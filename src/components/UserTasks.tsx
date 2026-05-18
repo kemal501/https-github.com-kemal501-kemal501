@@ -103,19 +103,103 @@ export default function UserTasks() {
     }
   };
 
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const [stream, setStream] = React.useState<MediaStream | null>(null);
+
+  const startCamera = async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user' },
+        audio: false 
+      });
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+    } catch (err) {
+      console.error("Camera access denied:", err);
+      setIsVerifying(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+  };
+
+  const [verificationStep, setVerificationStep] = React.useState<string>('Align face in frame');
+
+  const [capturedImage, setCapturedImage] = React.useState<string | null>(null);
+
+  const captureSnapshot = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(-1, 1);
+        ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
+        setCapturedImage(canvas.toDataURL('image/jpeg'));
+      }
+    }
+  };
+
   const handleVerify = async () => {
     setIsVerifying(true);
-    // Simulate scan
-    setTimeout(async () => {
-      setIsFaceVerified(true);
-      setIsVerifying(false);
+    setVerificationStep('Initializing Camera...');
+    await startCamera();
+    
+    const steps = [
+      { label: 'Align face in frame', delay: 1500 },
+      { label: 'Blink your eyes', delay: 2000 },
+      { label: 'Hold still... Capturing', delay: 1500, action: captureSnapshot },
+      { label: 'Processing biometrics...', delay: 2000 },
+      { label: 'Checking authenticity...', delay: 1500 },
+      { label: 'Verifying with database...', delay: 1500 },
+      { label: 'Identity Confirmed!', delay: 1000 }
+    ];
 
-      setTasks(prev => prev.map(t => {
-        if (t.id === 'verification') return { ...t, progress: 1 };
-        if (t.id === 'engagement') return { ...t, status: 'available' };
-        return t;
-      }));
-    }, 3000);
+    let current = 0;
+    const processStep = async (index: number) => {
+      if (index >= steps.length) {
+        stopCamera();
+        
+        // Persist verification to Firestore
+        if (auth.currentUser) {
+          try {
+            await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+              isFaceVerified: true,
+              faceVerifiedAt: serverTimestamp()
+            });
+          } catch (error) {
+            console.error("Failed to persist verification:", error);
+          }
+        }
+
+        setIsFaceVerified(true);
+        setIsVerifying(false);
+        setCapturedImage(null);
+
+        setTasks(prev => prev.map(t => {
+          if (t.id === 'verification') return { ...t, progress: 1, status: 'completed' };
+          if (t.id === 'engagement') return { ...t, status: 'available' };
+          return t;
+        }));
+        return;
+      }
+
+      setVerificationStep(steps[index].label);
+      if (steps[index].action) steps[index].action();
+
+      setTimeout(() => {
+        processStep(index + 1);
+      }, steps[index].delay);
+    };
+
+    processStep(0);
   };
 
   // Remove auto-claim logic
@@ -213,23 +297,57 @@ export default function UserTasks() {
               </div>
 
               {task.id === 'verification' && task.status === 'available' && task.progress < task.target && (
-                <button 
-                  onClick={handleVerify}
-                  disabled={isVerifying}
-                  className="w-full bg-white text-black font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] hover:bg-amber-400 transition-all flex items-center justify-center gap-2"
-                >
+                <div className="space-y-4">
                   {isVerifying ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-black border-t-transparent" />
-                      Scanning Face...
-                    </>
+                    <div className="relative aspect-square w-full max-w-[240px] mx-auto rounded-[2rem] overflow-hidden border-4 border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.3)] bg-black">
+                      {capturedImage ? (
+                        <motion.img 
+                          initial={{ opacity: 0, scale: 1.1 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          src={capturedImage} 
+                          className="w-full h-full object-cover grayscale brightness-125"
+                        />
+                      ) : (
+                        <video 
+                          ref={videoRef}
+                          autoPlay 
+                          playsInline 
+                          muted 
+                          className="w-full h-full object-cover scale-x-[-1]"
+                        />
+                      )}
+                      
+                      <div className="absolute inset-0 border-[20px] border-black/20 rounded-[1.8rem] pointer-events-none" />
+                      
+                      {/* Scanning Line Animation */}
+                      <motion.div 
+                        initial={{ top: '0%' }}
+                        animate={{ top: '100%' }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                        className="absolute left-0 right-0 h-1 bg-amber-400 shadow-[0_0_15px_rgba(251,191,36,1)] z-10"
+                      />
+                      
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-48 h-64 border-2 border-white/30 rounded-[3rem] dashed shadow-[0_0_0_9999px_rgba(0,0,0,0.4)]" />
+                      </div>
+
+                      <div className="absolute bottom-4 left-0 right-0 text-center px-4">
+                        <span className="bg-amber-400 text-black text-[8px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg">
+                          {verificationStep}
+                        </span>
+                      </div>
+                    </div>
                   ) : (
-                    <>
+                    <button 
+                      onClick={handleVerify}
+                      disabled={isVerifying}
+                      className="w-full bg-white text-black font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] hover:bg-amber-400 transition-all flex items-center justify-center gap-2"
+                    >
                       <Camera className="w-4 h-4" />
                       Start Face Scan
-                    </>
+                    </button>
                   )}
-                </button>
+                </div>
               )}
 
               {task.status !== 'completed' && task.id !== 'verification' && task.id !== 'daily-bonus' && (

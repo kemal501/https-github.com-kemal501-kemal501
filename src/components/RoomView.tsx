@@ -9,7 +9,7 @@ import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, St
 import { cn } from '../lib/utils';
 import Gifts from './Gifts';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, orderBy, limit, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, getDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, getDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
 interface Message {
   id: string;
@@ -32,6 +32,21 @@ interface RoomViewProps {
 }
 
 export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
+  const [seats, setSeats] = React.useState<{ id: number, occupied: boolean, user: any, isLocked?: boolean }[]>(() => 
+    Array.from({ length: 24 }).map((_, i) => ({
+      id: i,
+      occupied: i < 3,
+      user: i < 3 ? { 
+        name: i === 0 ? room.host : (i === 1 ? 'Melat' : 'Guest_2'), 
+        avatar: `https://i.pravatar.cc/100?u=${i}`,
+        videoEnabled: i === 0,
+        isMuted: false,
+        voiceEffect: 'none'
+      } : null,
+      isLocked: false
+    }))
+  );
+
   const [isMuted, setIsMuted] = React.useState(false);
   const [localStream, setLocalStream] = React.useState<MediaStream | null>(null);
   
@@ -132,20 +147,6 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
 
   // 24 seat simulation logic
   // Dynamic Seats State
-  const [seats, setSeats] = React.useState<{ id: number, occupied: boolean, user: any, isLocked?: boolean }[]>(() => 
-    Array.from({ length: 24 }).map((_, i) => ({
-      id: i,
-      occupied: i < 3, // Start with some initial users
-      user: i < 3 ? { 
-        name: i === 0 ? room.host : (i === 1 ? 'Melat' : 'Guest_2'), 
-        avatar: `https://i.pravatar.cc/100?u=${i}`,
-        videoEnabled: i === 0, // Host starts with video
-        isMuted: false,
-        voiceEffect: 'none'
-      } : null,
-      isLocked: false
-    }))
-  );
 
   const prevSeatsRef = React.useRef(seats);
 
@@ -479,7 +480,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     if (room.id.startsWith('room_')) return;
 
     const messagesRef = collection(db, 'rooms', room.id, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'), limit(50));
+    const q = firestoreQuery(messagesRef, firestoreOrderBy('createdAt', 'asc'), firestoreLimit(50));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const newMessages = snapshot.docs.map(doc => ({
@@ -855,9 +856,11 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                 key={seat.id}
                 layout
                 initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                whileHover={{ scale: 1.05 }}
-                animate={shakingSeatId === seat.id ? { x: [-3, 3, -3, 3, 0], backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.5)' } : {}}
+                animate={{ 
+                  opacity: 1, 
+                  scale: 1,
+                  ...(shakingSeatId === seat.id ? { x: [-3, 3, -3, 3, 0], backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.5)' } : {})
+                }}
                 transition={{ duration: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
                 onClick={() => handleSeatClick(seat)}
                 className={cn(

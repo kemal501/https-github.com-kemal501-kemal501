@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, updateDoc, setDoc, serverTimestamp, increment, getDoc, collection, query, orderBy, onSnapshot, addDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, serverTimestamp, increment, getDoc, collection, query as firestoreQuery, orderBy as firestoreOrderBy, onSnapshot, addDoc } from 'firebase/firestore';
 
 const CONVERSION_RATE = 1000; // 1000 coins = $1
 const MIN_WITHDRAWAL_USD = 10;
@@ -74,10 +74,10 @@ export default function WalletWithdrawal() {
       setLoading(false);
     });
 
-    const withdrawalsQuery = query(
+    const withdrawalsQuery = firestoreQuery(
       collection(db, 'withdrawals'),
       // where('userId', '==', userId), // Need index or user client filtering for now
-      orderBy('createdAt', 'desc')
+      firestoreOrderBy('createdAt', 'desc')
     );
 
     const withdrawalsUnsub = onSnapshot(withdrawalsQuery, (snap) => {

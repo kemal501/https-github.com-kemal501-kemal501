@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Wallet from './components/WalletWithdrawal';
 import RoomSettings from './components/RoomSettings';
@@ -16,9 +16,10 @@ import AgentDashboard from './components/AgentDashboard';
 import UserTasks from './components/UserTasks';
 import Games from './components/Games';
 import AuthForm from './components/AuthForm';
+import CreateRoomModal from './components/CreateRoomModal';
 import { cn } from './lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
-import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 
 // --- MOCK COMPONENTS ---
@@ -88,6 +89,8 @@ export default function App() {
   const [viewingProfile, setViewingProfile] = React.useState<string | null>(null);
   const [hostSearchQuery, setHostSearchQuery] = React.useState('');
   const [selectedCategory, setSelectedCategory] = React.useState('All');
+  const [showCreateRoom, setShowCreateRoom] = React.useState(false);
+  const [rooms, setRooms] = React.useState<any[]>([]);
   const [authReady, setAuthReady] = React.useState(false);
   const [currentUser, setCurrentUser] = React.useState<any>(null);
 
@@ -161,6 +164,21 @@ export default function App() {
     });
     return () => unsub();
   }, [currentUser]);
+
+  // Sync Rooms from Firestore
+  React.useEffect(() => {
+    const q = firestoreQuery(collection(db, 'rooms'), firestoreOrderBy('createdAt', 'desc'), firestoreLimit(20));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const dbRooms = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).filter((room: any) => !room.isPrivate);
+      setRooms(dbRooms);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'rooms');
+    });
+    return () => unsub();
+  }, []);
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -310,6 +328,17 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Create Room Modal */}
+      <CreateRoomModal 
+        isOpen={showCreateRoom} 
+        onClose={() => setShowCreateRoom(false)} 
+        onRoomCreated={(room) => {
+          setActiveRoom(room);
+          setShowCreateRoom(false);
+        }}
+      />
+
       {/* Dynamic Header */}
       <header className="sticky top-0 z-40 bg-black/80 backdrop-blur-xl border-b border-zinc-900 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -360,27 +389,41 @@ export default function App() {
               </div>
               
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                {[...Array(6)].map((_, i) => {
-                  const roomData = {
-                    id: `room_${i}`,
-                    title: ["Night Vibes 🌙", "Ethiopia Stars 🇪🇹", "Voice Party!", "Chitchat Room", "Chill & Grill", "Global Connect"][i],
-                    host: ["Abebe", "Sara", "Khalid", "Elena", "Miko", "Yoni"][i],
-                    viewers: ["1.2K", "890", "2.4K", "150", "3.2K", "600"][i],
-                    type: (i % 2 === 0 ? 'video' : 'voice') as 'video' | 'voice',
-                    tier: i === 0 ? 'Gold Agency' : 'Standard'
-                  };
-                  return (
+                {rooms.length > 0 ? (
+                  rooms.map((roomData, i) => (
                     <RoomCard 
-                      key={i} 
+                      key={roomData.id} 
                       title={roomData.title}
                       host={roomData.host}
-                      viewers={roomData.viewers}
+                      viewers={roomData.viewerCount?.toString() || "0"}
                       type={roomData.type}
                       onJoin={() => joinRoom(roomData)}
                       onShowProfile={(host) => setViewingProfile(host)}
                     />
-                  );
-                })}
+                  ))
+                ) : (
+                  [...Array(4)].map((_, i) => {
+                    const roomData = {
+                      id: `room_${i}`,
+                      title: ["Night Vibes 🌙", "Ethiopia Stars 🇪🇹", "Voice Party!", "Chitchat Room"][i],
+                      host: ["Abebe", "Sara", "Khalid", "Elena"][i],
+                      viewers: ["1.2K", "890", "2.4K", "150"][i],
+                      type: (i % 2 === 0 ? 'video' : 'voice') as 'video' | 'voice',
+                      tier: i === 0 ? 'Gold Agency' : 'Standard'
+                    };
+                    return (
+                      <RoomCard 
+                        key={i} 
+                        title={roomData.title}
+                        host={roomData.host}
+                        viewers={roomData.viewers}
+                        type={roomData.type}
+                        onJoin={() => joinRoom(roomData)}
+                        onShowProfile={(host) => setViewingProfile(host)}
+                      />
+                    );
+                  })
+                )}
               </div>
 
               {/* Popular Hosts Section */}
@@ -520,45 +563,57 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-8"
             >
-              <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[3rem] space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <h3 className="text-xl font-black text-white uppercase italic">Room Setup</h3>
-                    <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Select your broadcast mode</p>
+              <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[3rem] space-y-8 relative overflow-hidden group">
+                <div className="absolute inset-0 bg-gradient-to-br from-amber-400/5 to-transparent pointer-events-none" />
+                
+                <div className="flex flex-col items-center text-center space-y-4 relative z-10">
+                  <div className="w-24 h-24 bg-amber-400/10 rounded-full flex items-center justify-center border border-amber-400/20 shadow-2xl shadow-amber-400/10 mb-2">
+                    <Radio className="w-12 h-12 text-amber-400 animate-pulse" />
                   </div>
+                  <div className="space-y-2">
+                    <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">Ready to Lead?</h3>
+                    <p className="text-zinc-500 text-xs font-bold uppercase tracking-[0.2em] max-w-sm mx-auto leading-relaxed">
+                      Create your own exclusive digital space. Host talk shows, concerts, or gaming sessions with up to 24 users on stage.
+                    </p>
+                  </div>
+
+                  <button 
+                    onClick={() => setShowCreateRoom(true)}
+                    className="bg-gradient-to-r from-amber-400 to-orange-600 text-white px-12 py-5 rounded-[2.5rem] font-black uppercase tracking-[0.3em] shadow-2xl shadow-orange-600/30 hover:scale-[1.05] active:scale-[0.95] transition-all text-xs border border-white/10"
+                  >
+                    Launch New Room
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <button className="flex flex-col items-center gap-4 p-8 rounded-[2rem] bg-zinc-950 border border-zinc-800 hover:border-amber-400 group transition-all">
-                    <div className="bg-amber-400/10 p-4 rounded-xl group-hover:bg-amber-400 group-hover:text-black transition-all">
-                      <Mic className="w-8 h-8 text-amber-400 group-hover:text-inherit" />
+                <div className="grid grid-cols-2 gap-4 relative z-10 pt-4">
+                  <div className="bg-black/40 border border-zinc-800 p-6 rounded-[2rem] flex items-center gap-4 hover:border-amber-400/30 transition-colors">
+                    <div className="w-12 h-12 bg-amber-400/5 rounded-2xl flex items-center justify-center border border-amber-400/10">
+                      <Mic className="w-6 h-6 text-amber-400" />
                     </div>
-                    <span className="text-zinc-400 font-black uppercase text-[10px] tracking-widest group-hover:text-white">Audio Room</span>
-                  </button>
-                  <button className="flex flex-col items-center gap-4 p-8 rounded-[2rem] bg-zinc-950 border border-zinc-800 hover:border-blue-400 group transition-all">
-                    <div className="bg-blue-400/10 p-4 rounded-xl group-hover:bg-blue-400 group-hover:text-black transition-all">
-                      <Video className="w-8 h-8 text-blue-400 group-hover:text-inherit" />
+                    <div>
+                      <p className="text-white font-black text-[10px] uppercase tracking-widest">Audio First</p>
+                      <p className="text-zinc-600 text-[8px] font-bold uppercase tracking-tighter">Ultra Low Latency</p>
                     </div>
-                    <span className="text-zinc-400 font-black uppercase text-[10px] tracking-widest group-hover:text-white">Video Voice</span>
-                  </button>
+                  </div>
+                  <div className="bg-black/40 border border-zinc-800 p-6 rounded-[2rem] flex items-center gap-4 hover:border-blue-400/30 transition-colors">
+                    <div className="w-12 h-12 bg-blue-400/5 rounded-2xl flex items-center justify-center border border-blue-400/10">
+                      <Video className="w-6 h-6 text-blue-400" />
+                    </div>
+                    <div>
+                      <p className="text-white font-black text-[10px] uppercase tracking-widest">Video HD</p>
+                      <p className="text-zinc-600 text-[8px] font-bold uppercase tracking-tighter">4K 60FPS Support</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <RoomSettings />
-              <ModerationTools />
-              
-              <div className="bg-zinc-900/50 p-8 rounded-[3rem] border border-zinc-800/50 text-center space-y-4">
-                <div className="w-20 h-20 bg-amber-400/10 rounded-full flex items-center justify-center mx-auto text-amber-400">
-                  <Radio className="w-10 h-10 animate-pulse" />
+              <div className="space-y-6">
+                <div className="flex items-center gap-3 px-4">
+                  <ShieldCheck className="w-4 h-4 text-zinc-600" />
+                  <h3 className="text-zinc-600 font-black uppercase tracking-[0.3em] text-[10px]">Security Frameworks</h3>
                 </div>
-                <h3 className="text-2xl font-black text-white uppercase italic">Ready to Go Live?</h3>
-                <p className="text-zinc-500 max-w-sm mx-auto">Configure your 24 advanced settings above and start your journey on Barca-live.</p>
-                <button 
-                  onClick={() => joinRoom({ id: currentUser?.uid || 'my_room', title: 'My Awesome Stream', host: userProfile.displayName, type: 'video', tier: 'Gold Agency' })}
-                  className="bg-gradient-to-r from-amber-400 to-orange-600 text-white px-12 py-5 rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl shadow-orange-600/30 active:scale-95 transition-all text-sm"
-                >
-                  Start Broadcast
-                </button>
+                <RoomSettings />
+                <ModerationTools />
               </div>
             </motion.div>
           )}
