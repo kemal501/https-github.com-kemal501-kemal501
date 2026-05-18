@@ -1160,38 +1160,93 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                       <section className="space-y-4">
                         <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Broadcast Management</h3>
                         <div className="space-y-4">
-                          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] flex items-center justify-between">
+                          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] flex items-center justify-between group">
                             <div className="flex items-center gap-4">
                               <div className={cn("w-3 h-3 rounded-full", isStreaming ? "bg-red-500 animate-pulse outline outline-4 outline-red-500/20" : "bg-zinc-800")} />
                               <div>
                                 <p className="text-white font-bold tracking-tight">{isStreaming ? 'STREAMING LIVE' : 'BROADCAST IDLE'}</p>
-                                <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mt-0.5">{streamQuality} • 60fps • 4.2 Mbps</p>
+                                <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mt-0.5">
+                                  {streamQuality} • 60fps • {
+                                    streamQuality === '4K' ? '25 Mbps' : 
+                                    streamQuality === '1080p' ? '6.0 Mbps' : '2.5 Mbps'
+                                  }
+                                </p>
                               </div>
                             </div>
                             <button 
                               onClick={() => setIsStreaming(!isStreaming)}
                               className={cn(
-                                "w-12 h-12 rounded-2xl flex items-center justify-center transition-all shadow-xl",
+                                "px-6 py-3 rounded-2xl flex items-center gap-2 transition-all shadow-xl font-black text-[10px] uppercase tracking-widest",
                                 isStreaming ? "bg-red-500 text-white shadow-red-500/20" : "bg-green-500 text-white shadow-green-500/20"
                               )}
                             >
-                              {isStreaming ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                              {isStreaming ? (
+                                <>
+                                  <VideoOff className="w-4 h-4" />
+                                  Stop Broadcast
+                                </>
+                              ) : (
+                                <>
+                                  <Radio className="w-4 h-4" />
+                                  Start Broadcast
+                                </>
+                              )}
                             </button>
                           </div>
 
-                          <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between">
-                            <span className="text-zinc-400 text-[10px] font-black uppercase tracking-widest">Quality Preset</span>
-                            <div className="flex gap-2">
-                              {['720p', '1080p', '4K'].map(q => (
+                          {/* Video Preview Feed */}
+                          <div className="bg-black/40 border border-zinc-800 rounded-[2.5rem] p-2 overflow-hidden aspect-video relative group">
+                            {isStreaming ? (
+                              <>
+                                <img 
+                                  src={`https://picsum.photos/seed/preview-${room.id}/640/360`} 
+                                  className={cn("w-full h-full object-cover rounded-[2rem] transition-opacity", !isPlaying && "opacity-40 grayscale")} 
+                                  alt="Preview"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button 
+                                    onClick={() => setIsPlaying(!isPlaying)}
+                                    className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white"
+                                  >
+                                    {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
+                                  </button>
+                                </div>
+                                <div className="absolute bottom-6 left-6 px-3 py-1 bg-black/60 backdrop-blur-lg rounded-full border border-white/10">
+                                  <span className="text-[8px] font-black text-white uppercase tracking-[0.2em] flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                                    Live Preview
+                                  </span>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center gap-3">
+                                <VideoOff className="w-10 h-10 text-zinc-800" />
+                                <p className="text-zinc-700 text-[10px] font-black uppercase tracking-widest italic">Preview Not Available</p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-3">
+                            <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em] px-2">Quality & Bitrate</p>
+                            <div className="grid grid-cols-3 gap-3">
+                              {[
+                                { id: '720p', label: 'HD 720p', bitrate: '2.5 Mbps' },
+                                { id: '1080p', label: 'FULL HD', bitrate: '6.0 Mbps' },
+                                { id: '4K', label: 'ULTRA 4K', bitrate: '25 Mbps' }
+                              ].map((q) => (
                                 <button 
-                                  key={q}
-                                  onClick={() => setStreamQuality(q)}
+                                  key={q.id}
+                                  onClick={() => setStreamQuality(q.id)}
                                   className={cn(
-                                    "px-3 py-1 rounded-lg text-[9px] font-black transition-all",
-                                    streamQuality === q ? "bg-amber-400 text-black" : "bg-zinc-800 text-zinc-500 hover:text-white"
+                                    "flex flex-col items-center justify-center p-4 rounded-3xl border transition-all gap-1",
+                                    streamQuality === q.id 
+                                      ? "bg-amber-400 border-amber-400 text-black shadow-lg shadow-amber-400/20" 
+                                      : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
                                   )}
                                 >
-                                  {q}
+                                  <span className="text-[10px] font-black uppercase tracking-tighter">{q.label}</span>
+                                  <span className={cn("text-[8px] font-bold", streamQuality === q.id ? "text-black/60" : "text-zinc-600")}>{q.bitrate}</span>
                                 </button>
                               ))}
                             </div>
