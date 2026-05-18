@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2, ShieldCheck, Camera } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Wallet from './components/WalletWithdrawal';
 import RoomSettings from './components/RoomSettings';
@@ -17,6 +17,7 @@ import UserTasks from './components/UserTasks';
 import Games from './components/Games';
 import AuthForm from './components/AuthForm';
 import CreateRoomModal from './components/CreateRoomModal';
+import FaceVerification from './components/FaceVerification';
 import { cn } from './lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit } from 'firebase/firestore';
@@ -90,6 +91,7 @@ export default function App() {
   const [hostSearchQuery, setHostSearchQuery] = React.useState('');
   const [selectedCategory, setSelectedCategory] = React.useState('All');
   const [showCreateRoom, setShowCreateRoom] = React.useState(false);
+  const [showFaceVerification, setShowFaceVerification] = React.useState(false);
   const [rooms, setRooms] = React.useState<any[]>([]);
   const [authReady, setAuthReady] = React.useState(false);
   const [currentUser, setCurrentUser] = React.useState<any>(null);
@@ -702,6 +704,15 @@ export default function App() {
                 </div>
 
                 <div className="mt-8 flex gap-3">
+                  {!userProfile.isVerified && (
+                    <button 
+                      onClick={() => setShowFaceVerification(true)}
+                      className="bg-red-500 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-red-500/20 active:scale-95 transition-all flex items-center gap-2"
+                    >
+                      <Camera className="w-4 h-4" />
+                      Verify Face
+                    </button>
+                  )}
                   <button 
                     onClick={() => setActiveTab('agency')}
                     className="bg-zinc-900 border border-zinc-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-zinc-800 transition-all flex items-center gap-2"
@@ -932,6 +943,14 @@ export default function App() {
       >
         <UserX className="w-8 h-8 font-black" />
       </button>
+
+      <FaceVerification 
+        isOpen={showFaceVerification} 
+        onClose={() => setShowFaceVerification(false)} 
+        onVerified={() => {
+          // Profile is synced via onSnapshot
+        }}
+      />
     </div>
   );
 }

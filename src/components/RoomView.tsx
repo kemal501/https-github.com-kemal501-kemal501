@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell } from 'lucide-react';
+import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key } from 'lucide-react';
 import { cn } from '../lib/utils';
 import Gifts from './Gifts';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -144,6 +144,16 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isBgmEnabled, setIsBgmEnabled] = React.useState(true);
   const [activeSeatInfoId, setActiveSeatInfoId] = React.useState<number | null>(null);
+  const [roomPassword, setRoomPassword] = React.useState('');
+
+  const handleUpdateRoomSettings = async (updates: any) => {
+    if (room.id.startsWith('room_')) return;
+    try {
+      await updateDoc(doc(db, 'rooms', room.id), updates);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `rooms/${room.id}`);
+    }
+  };
 
   // 24 seat simulation logic
   // Dynamic Seats State
@@ -228,6 +238,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
           setIsBgmEnabled(data.settings.isBgmEnabled ?? true);
           setIsPrivate(data.settings.isPrivate ?? false);
           setEntryFee(data.settings.entryFee ?? 100);
+          setRoomPassword(data.settings.password || '');
         }
         if (data.bannedUsers) {
           setBannedUsers(data.bannedUsers);
@@ -1176,84 +1187,91 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                 </p>
                               </div>
                             </div>
-                            <button 
-                              onClick={() => setIsStreaming(!isStreaming)}
-                              className={cn(
-                                "px-6 py-3 rounded-2xl flex items-center gap-2 transition-all shadow-xl font-black text-[10px] uppercase tracking-widest",
-                                isStreaming ? "bg-red-500 text-white shadow-red-500/20" : "bg-green-500 text-white shadow-green-500/20"
-                              )}
-                            >
+                              <button 
+                                onClick={async () => {
+                                  const newVal = !isStreaming;
+                                  setIsStreaming(newVal);
+                                  handleUpdateRoomSettings({ status: newVal ? 'live' : 'idle' });
+                                }}
+                                className={cn(
+                                  "px-6 py-3 rounded-2xl flex items-center gap-2 transition-all shadow-xl font-black text-[10px] uppercase tracking-widest",
+                                  isStreaming ? "bg-red-500 text-white shadow-red-500/20" : "bg-green-500 text-white shadow-green-500/20"
+                                )}
+                              >
+                                {isStreaming ? (
+                                  <>
+                                    <VideoOff className="w-4 h-4" />
+                                    Stop Broadcast
+                                  </>
+                                ) : (
+                                  <>
+                                    <Radio className="w-4 h-4" />
+                                    Start Broadcast
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Video Preview Feed */}
+                            <div className="bg-black/40 border border-zinc-800 rounded-[2.5rem] p-2 overflow-hidden aspect-video relative group">
                               {isStreaming ? (
                                 <>
-                                  <VideoOff className="w-4 h-4" />
-                                  Stop Broadcast
+                                  <img 
+                                    src={`https://picsum.photos/seed/preview-${room.id}/640/360`} 
+                                    className={cn("w-full h-full object-cover rounded-[2rem] transition-opacity", !isPlaying && "opacity-40 grayscale")} 
+                                    alt="Preview"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                      onClick={() => setIsPlaying(!isPlaying)}
+                                      className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white"
+                                    >
+                                      {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
+                                    </button>
+                                  </div>
+                                  <div className="absolute bottom-6 left-6 px-3 py-1 bg-black/60 backdrop-blur-lg rounded-full border border-white/10">
+                                    <span className="text-[8px] font-black text-white uppercase tracking-[0.2em] flex items-center gap-2">
+                                      <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                                      Live Preview
+                                    </span>
+                                  </div>
                                 </>
                               ) : (
-                                <>
-                                  <Radio className="w-4 h-4" />
-                                  Start Broadcast
-                                </>
+                                <div className="w-full h-full flex flex-col items-center justify-center gap-3">
+                                  <VideoOff className="w-10 h-10 text-zinc-800" />
+                                  <p className="text-zinc-700 text-[10px] font-black uppercase tracking-widest italic">Preview Not Available</p>
+                                </div>
                               )}
-                            </button>
-                          </div>
-
-                          {/* Video Preview Feed */}
-                          <div className="bg-black/40 border border-zinc-800 rounded-[2.5rem] p-2 overflow-hidden aspect-video relative group">
-                            {isStreaming ? (
-                              <>
-                                <img 
-                                  src={`https://picsum.photos/seed/preview-${room.id}/640/360`} 
-                                  className={cn("w-full h-full object-cover rounded-[2rem] transition-opacity", !isPlaying && "opacity-40 grayscale")} 
-                                  alt="Preview"
-                                  referrerPolicy="no-referrer"
-                                />
-                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button 
-                                    onClick={() => setIsPlaying(!isPlaying)}
-                                    className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white"
-                                  >
-                                    {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
-                                  </button>
-                                </div>
-                                <div className="absolute bottom-6 left-6 px-3 py-1 bg-black/60 backdrop-blur-lg rounded-full border border-white/10">
-                                  <span className="text-[8px] font-black text-white uppercase tracking-[0.2em] flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-                                    Live Preview
-                                  </span>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="w-full h-full flex flex-col items-center justify-center gap-3">
-                                <VideoOff className="w-10 h-10 text-zinc-800" />
-                                <p className="text-zinc-700 text-[10px] font-black uppercase tracking-widest italic">Preview Not Available</p>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="space-y-3">
-                            <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em] px-2">Quality & Bitrate</p>
-                            <div className="grid grid-cols-3 gap-3">
-                              {[
-                                { id: '720p', label: 'HD 720p', bitrate: '2.5 Mbps' },
-                                { id: '1080p', label: 'FULL HD', bitrate: '6.0 Mbps' },
-                                { id: '4K', label: 'ULTRA 4K', bitrate: '25 Mbps' }
-                              ].map((q) => (
-                                <button 
-                                  key={q.id}
-                                  onClick={() => setStreamQuality(q.id)}
-                                  className={cn(
-                                    "flex flex-col items-center justify-center p-4 rounded-3xl border transition-all gap-1",
-                                    streamQuality === q.id 
-                                      ? "bg-amber-400 border-amber-400 text-black shadow-lg shadow-amber-400/20" 
-                                      : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
-                                  )}
-                                >
-                                  <span className="text-[10px] font-black uppercase tracking-tighter">{q.label}</span>
-                                  <span className={cn("text-[8px] font-bold", streamQuality === q.id ? "text-black/60" : "text-zinc-600")}>{q.bitrate}</span>
-                                </button>
-                              ))}
                             </div>
-                          </div>
+
+                            <div className="space-y-3">
+                              <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em] px-2">Quality & Bitrate</p>
+                              <div className="grid grid-cols-3 gap-3">
+                                {[
+                                  { id: '720p', label: 'HD 720p', bitrate: '2.5 Mbps' },
+                                  { id: '1080p', label: 'FULL HD', bitrate: '6.0 Mbps' },
+                                  { id: '4K', label: 'ULTRA 4K', bitrate: '25 Mbps' }
+                                ].map((q) => (
+                                  <button 
+                                    key={q.id}
+                                    onClick={() => {
+                                      setStreamQuality(q.id);
+                                      handleUpdateRoomSettings({ 'settings.streamQuality': q.id });
+                                    }}
+                                    className={cn(
+                                      "flex flex-col items-center justify-center p-4 rounded-3xl border transition-all gap-1",
+                                      streamQuality === q.id 
+                                        ? "bg-amber-400 border-amber-400 text-black shadow-lg shadow-amber-400/20" 
+                                        : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                                    )}
+                                  >
+                                    <span className="text-[10px] font-black uppercase tracking-tighter">{q.label}</span>
+                                    <span className={cn("text-[8px] font-bold", streamQuality === q.id ? "text-black/60" : "text-zinc-600")}>{q.bitrate}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                         </div>
                       </section>
 
@@ -1528,7 +1546,15 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                     >
                       {/* Room Info */}
                       <section className="space-y-4">
-                        <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Room Identity</h3>
+                        <div className="flex items-center justify-between px-2">
+                          <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Room Identity</h3>
+                          <button 
+                            onClick={() => handleUpdateRoomSettings({ title: roomTitle })}
+                            className="text-[9px] font-black text-amber-400 uppercase tracking-widest hover:text-amber-300 transition-colors"
+                          >
+                            Sync Changes
+                          </button>
+                        </div>
                         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] space-y-6">
                           <div className="space-y-2">
                             <label className="text-zinc-500 text-[10px] font-black uppercase tracking-widest ml-1">Room Title</label>
@@ -1559,7 +1585,11 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                               </div>
                             </div>
                             <button 
-                              onClick={() => setVoiceFXEnabled(!voiceFXEnabled)}
+                              onClick={() => {
+                                const newVal = !voiceFXEnabled;
+                                setVoiceFXEnabled(newVal);
+                                handleUpdateRoomSettings({ 'settings.voiceFXEnabled': newVal });
+                              }}
                               className={cn(
                                 "w-12 h-7 rounded-full relative transition-all duration-300 p-1",
                                 voiceFXEnabled ? "bg-purple-500" : "bg-zinc-800"
@@ -1589,7 +1619,11 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                               </div>
                             </div>
                             <button 
-                              onClick={() => setIsPrivate(!isPrivate)}
+                              onClick={() => {
+                                const newVal = !isPrivate;
+                                setIsPrivate(newVal);
+                                handleUpdateRoomSettings({ 'settings.isPrivate': newVal });
+                              }}
                               className={cn(
                                 "w-12 h-7 rounded-full relative transition-all duration-300 p-1",
                                 isPrivate ? "bg-amber-400" : "bg-zinc-800"
@@ -1610,22 +1644,54 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                 exit={{ height: 0, opacity: 0 }}
                                 className="overflow-hidden space-y-4 pt-4 border-t border-zinc-800"
                               >
-                                <div className="flex items-center justify-between">
-                                  <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest">Entry Fee (Coins)</p>
-                                  <div className="flex items-center gap-3">
-                                    <button 
-                                      onClick={() => setEntryFee(Math.max(50, entryFee - 50))}
-                                      className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold"
-                                    >
-                                      -
-                                    </button>
-                                    <span className="text-amber-400 font-black text-sm w-12 text-center">{entryFee}</span>
-                                    <button 
-                                      onClick={() => setEntryFee(entryFee + 50)}
-                                      className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold"
-                                    >
-                                      +
-                                    </button>
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest">Entry Fee (Coins)</p>
+                                    <div className="flex items-center gap-3">
+                                      <button 
+                                        onClick={() => {
+                                          const newVal = Math.max(50, entryFee - 50);
+                                          setEntryFee(newVal);
+                                          handleUpdateRoomSettings({ 'settings.entryFee': newVal });
+                                        }}
+                                        className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="text-amber-400 font-black text-sm w-12 text-center">{entryFee}</span>
+                                      <button 
+                                        onClick={() => {
+                                          const newVal = entryFee + 50;
+                                          setEntryFee(newVal);
+                                          handleUpdateRoomSettings({ 'settings.entryFee': newVal });
+                                        }}
+                                        className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="space-y-2">
+                                    <label className="text-zinc-500 text-[10px] font-black uppercase tracking-widest ml-1 flex items-center gap-2">
+                                      <Key className="w-3 h-3" />
+                                      Access Password
+                                    </label>
+                                    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl px-1 py-1 flex items-center gap-2">
+                                      <input 
+                                        type="text" 
+                                        placeholder="Optional password..."
+                                        value={roomPassword}
+                                        onChange={(e) => setRoomPassword(e.target.value)}
+                                        className="w-full bg-transparent px-4 py-3 text-white text-xs font-bold outline-none"
+                                      />
+                                      <button 
+                                        onClick={() => handleUpdateRoomSettings({ 'settings.password': roomPassword })}
+                                        className="bg-zinc-900 text-zinc-400 px-4 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest hover:text-white transition-all whitespace-nowrap mr-1"
+                                      >
+                                        Update
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               </motion.div>
@@ -1641,7 +1707,11 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                           <div className="flex items-center justify-between">
                             <p className="text-xs font-bold uppercase text-zinc-400">Background Music</p>
                             <button 
-                              onClick={toggleBgm}
+                              onClick={() => {
+                                const newVal = !isBgmEnabled;
+                                setIsBgmEnabled(newVal);
+                                handleUpdateRoomSettings({ 'settings.isBgmEnabled': newVal });
+                              }}
                               className="w-10 h-6 bg-zinc-800 rounded-full relative p-1"
                             >
                               <div className={cn("w-4 h-4 rounded-full transition-all shadow-md", isBgmEnabled ? "bg-amber-400 ml-4" : "bg-zinc-600")} />
@@ -1650,7 +1720,11 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                           <div className="flex items-center justify-between">
                             <p className="text-xs font-bold uppercase text-zinc-400">Seating Entry Effects</p>
                             <button 
-                              onClick={toggleEntryEffects}
+                              onClick={() => {
+                                const newVal = !entryEffectsEnabled;
+                                setEntryEffectsEnabled(newVal);
+                                handleUpdateRoomSettings({ 'settings.entryEffectsEnabled': newVal });
+                              }}
                               className="w-10 h-6 bg-zinc-800 rounded-full relative p-1"
                             >
                               <div className={cn("w-4 h-4 rounded-full transition-all shadow-md", entryEffectsEnabled ? "bg-amber-400 ml-4" : "bg-zinc-600")} />
