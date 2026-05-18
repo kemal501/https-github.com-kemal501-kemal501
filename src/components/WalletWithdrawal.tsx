@@ -121,40 +121,21 @@ export default function WalletWithdrawal() {
 
     setRequesting(true);
     try {
-      const amountCoins = user.coins;
-      const amountUSD = amountCoins / CONVERSION_RATE;
       const userId = auth.currentUser.uid;
-
-      // 1. Create withdrawal request
-      const withdrawalId = `WD-${Date.now()}`;
-      await setDoc(doc(db, 'withdrawals', withdrawalId), {
-        id: withdrawalId,
-        userId: userId,
-        amountCoins,
-        amountUSD: Number(amountUSD.toFixed(2)),
-        method: user.paymentMethod.type,
-        details: user.paymentMethod,
-        status: 'pending',
-        createdAt: serverTimestamp()
+      const res = await fetch("/api/withdraw/request", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, amountUSD: user.coins / CONVERSION_RATE })
       });
-
-      // 2. Deduct coins
-      await updateDoc(doc(db, 'users', userId), {
-        coins: 0
-      });
-
-      // 3. Create transaction log
-      await addDoc(collection(db, 'transactions'), {
-        fromId: userId,
-        toId: 'system',
-        amount: amountCoins,
-        type: 'withdrawal',
-        status: 'completed',
-        createdAt: serverTimestamp()
-      });
-
+      const data = await res.json();
+      if (data.success) {
+        alert("Withdrawal request submitted successfully!");
+      } else {
+        alert(data.error || "Withdrawal failed");
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'withdrawals');
+      console.error(error);
+      alert("System error during withdrawal");
     } finally {
       setRequesting(false);
     }

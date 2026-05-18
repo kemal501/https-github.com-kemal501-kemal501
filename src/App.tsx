@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2, ShieldCheck, Camera } from 'lucide-react';
+import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2, ShieldCheck, Camera, Coins } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Wallet from './components/WalletWithdrawal';
 import RoomSettings from './components/RoomSettings';
@@ -27,9 +27,13 @@ import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from
 
 const RoomCard = ({ title, host, viewers, type, onJoin, onShowProfile }: { key?: any, title: string, host: string, viewers: string, type: 'voice' | 'video', onJoin: () => void, onShowProfile: (host: string) => void }) => (
   <motion.div 
-    whileHover={{ y: -5 }}
+    whileHover={{ 
+      y: -8, 
+      scale: 1.02,
+      transition: { duration: 0.3, ease: "easeOut" }
+    }}
     onClick={onJoin}
-    className="relative group cursor-pointer overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 aspect-[4/5] shadow-xl"
+    className="relative group cursor-pointer overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 aspect-[4/5] shadow-xl hover:shadow-2xl hover:shadow-amber-400/5 transition-all duration-300"
   >
     <img 
       src={`https://picsum.photos/seed/${host}/400/500`} 
@@ -363,6 +367,12 @@ export default function App() {
           </h1>
         </div>
         <div className="flex items-center gap-4">
+          <div className="hidden sm:flex items-center gap-2 bg-zinc-900 px-4 py-2 rounded-xl border border-zinc-800 mr-2 shadow-inner">
+            <Coins className="w-3.5 h-3.5 text-amber-400" />
+            <span className="text-xs font-black italic text-amber-400">
+              {userProfile.coins.toLocaleString()}
+            </span>
+          </div>
           <button className="bg-zinc-900 border border-zinc-800 p-2.5 rounded-xl hover:bg-zinc-800 transition-colors">
             <Search className="w-5 h-5 text-zinc-400" />
           </button>

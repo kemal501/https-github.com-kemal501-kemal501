@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, ShieldCheck, Timer, Coins, Camera, ArrowRight, UserPlus, Star, Info, Zap, Loader2, History, TrendingUp, ArrowUpRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, updateDoc, setDoc, serverTimestamp, increment, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, serverTimestamp, increment, getDoc, collection, addDoc, onSnapshot } from 'firebase/firestore';
 
 interface Task {
   id: string;

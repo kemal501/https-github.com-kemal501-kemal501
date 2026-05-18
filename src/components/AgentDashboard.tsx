@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Users, UserPlus, ClipboardList, TrendingUp, Search, X, CheckCircle2, ShieldCheck, QrCode, Share2, Briefcase, Star, Settings, Plus, Camera, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 interface Host {
   id: string;
@@ -23,6 +23,8 @@ interface AgencyTask {
   deadline: string;
   status: 'available' | 'in-progress' | 'completed';
   assignedTo?: string;
+  agencyId?: string;
+  creatorId?: string;
 }
 
 export default function AgentDashboard() {

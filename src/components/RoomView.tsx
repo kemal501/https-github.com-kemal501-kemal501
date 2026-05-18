@@ -5,12 +5,12 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key, ChevronDown } from 'lucide-react';
+import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, Shield, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key, ChevronDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 import Gifts from './Gifts';
 import ChatSidebar from './ChatSidebar';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, getDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, getDoc, setDoc, arrayUnion, arrayRemove, increment } from 'firebase/firestore';
 
 interface Message {
   id: string;
@@ -25,6 +25,7 @@ interface RoomViewProps {
     id: string;
     title: string;
     host: string;
+    hostId: string;
     type: 'voice' | 'video';
     tier?: string;
   };
@@ -116,7 +117,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   });
   const [roomTitle, setRoomTitle] = React.useState(room.title);
   const [streamQuality, setStreamQuality] = React.useState('1080p');
-  const [activeConsoleTab, setActiveConsoleTab] = React.useState<'broadcast' | 'users' | 'settings'>('broadcast');
+  const [activeConsoleTab, setActiveConsoleTab] = React.useState<'broadcast' | 'requests' | 'users' | 'permissions' | 'settings'>('broadcast');
   const [selectedUserToModerate, setSelectedUserToModerate] = React.useState<any>(null);
   const [isPurchaseMode, setIsPurchaseMode] = React.useState(false);
   const [directMessageTarget, setDirectMessageTarget] = React.useState<string | null>(null);
@@ -249,6 +250,31 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
 
     return () => unsubscribe();
   }, [room.id]);
+
+  // Daily Bonus Heartbeat tracking
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const userId = auth.currentUser.uid;
+    
+    const sendHeartbeat = async () => {
+      try {
+        await fetch("/api/room/heartbeat", {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
+        });
+      } catch (e) {
+        console.error("Heartbeat failed", e);
+      }
+    };
+
+    // Send initial heartbeat
+    sendHeartbeat();
+
+    // Send every minute
+    const interval = setInterval(sendHeartbeat, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const toggleEntryEffects = async () => {
     const newVal = !entryEffectsEnabled;
@@ -546,7 +572,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const handleSendGift = async (gift: any, target: 'host' | 'self') => {
     if (!auth.currentUser) return;
     const senderRef = doc(db, 'users', auth.currentUser.uid);
-    const receiverId = target === 'host' ? roomData?.hostId : auth.currentUser.uid;
+    const receiverId = target === 'host' ? room.hostId : auth.currentUser.uid;
     if (!receiverId) return;
     const receiverRef = doc(db, 'users', receiverId);
 
@@ -643,10 +669,24 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   };
 
   const handleSeatClick = (seat: any) => {
-    if (activeSeatInfoId === seat.id) {
-      setActiveSeatInfoId(null);
+    if (isHost) {
+      openModeration(seat);
     } else {
-      setActiveSeatInfoId(seat.id);
+      if (seat.occupied) {
+        // Just show info for guests if occupied
+        if (activeSeatInfoId === seat.id) {
+          setActiveSeatInfoId(null);
+        } else {
+          setActiveSeatInfoId(seat.id);
+        }
+      } else if (!seat.isLocked) {
+        // Request to join if empty and not locked
+        openModeration(seat);
+      } else {
+        // Shake if locked
+        setShakingSeatId(seat.id);
+        setTimeout(() => setShakingSeatId(null), 400);
+      }
     }
   };
 
@@ -683,10 +723,12 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
 
   const SeatOverlay = ({ seat, onModerate }: { seat: any, onModerate: () => void }) => (
     <motion.div
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.8 }}
-      className="absolute z-[100] left-full ml-2 w-32 bg-black/90 backdrop-blur-md rounded-xl p-3 text-white text-[10px] shadow-2xl border border-zinc-800"
+      initial={{ opacity: 0, scale: 0.8, y: 10, x: "-50%" }}
+      animate={{ opacity: 1, scale: 1, y: 0, x: "-50%" }}
+      exit={{ opacity: 0, scale: 0.8, y: 10, x: "-50%" }}
+      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+      style={{ originY: 1 }}
+      className="absolute z-[100] bottom-full mb-3 left-1/2 w-40 bg-black/90 backdrop-blur-md rounded-xl p-3 text-white text-[10px] shadow-2xl border border-zinc-800"
       onClick={(e) => { e.stopPropagation(); onModerate(); }}
     >
       <p className="font-bold mb-1 truncate">{seat.user?.name || `Seat ${seat.id + 1}`}</p>
@@ -918,9 +960,11 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                     requestedSeats.some(r => r.seatId === seat.id) && "border-amber-400/50 bg-amber-400/5"
                   )}
                 >
-                  {activeSeatInfoId === seat.id && (
-                    <SeatOverlay seat={seat} onModerate={() => openModeration(seat)} />
-                  )}
+                  <AnimatePresence>
+                    {activeSeatInfoId === seat.id && (
+                      <SeatOverlay seat={seat} onModerate={() => openModeration(seat)} />
+                    )}
+                  </AnimatePresence>
                   {seat.occupied ? (
                     <>
                       <AnimatePresence>
@@ -988,7 +1032,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                         "w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all",
                         seat.isLocked
                           ? "border-red-500/50 bg-red-500/10 text-red-500"
-                          : requestedSeats.includes(seat.id) 
+                          : requestedSeats.some(r => r.seatId === seat.id) 
                             ? "border-amber-400 bg-amber-400/20 text-amber-400 rotate-12" 
                             : "border-zinc-800/50 text-zinc-800"
                       )}>
@@ -1039,6 +1083,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                   messages={messages.filter(msg => !blockedUsers.includes(msg.senderName))} 
                   onSendMessage={handleSendMessage}
                   onDeleteMessage={deleteMessage}
+                  onSeatClick={handleSeatClick}
                   isHost={isHost}
                   roomHost={room.host}
                   users={seats.filter(s => s.occupied && s.user).map(s => ({ name: s.user.name, avatar: s.user.avatar }))}
@@ -1201,8 +1246,9 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                 {[
                   { id: 'broadcast', label: 'Broadcast', icon: Radio },
                   { id: 'requests', label: 'Requests', icon: Bell },
-                  { id: 'users', label: 'Users', icon: Users },
-                  { id: 'settings', label: 'Settings', icon: Settings }
+                  { id: 'users', label: 'Participants', icon: Users },
+                  { id: 'permissions', label: 'Moderation', icon: Shield },
+                  { id: 'settings', label: 'Room', icon: Settings }
                 ].map((tab: any) => (
                   <button
                     key={tab.id}
@@ -1310,34 +1356,6 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                   <p className="text-zinc-700 text-[10px] font-black uppercase tracking-widest italic">Preview Not Available</p>
                                 </div>
                               )}
-                            </div>
-
-                            <div className="space-y-3">
-                              <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em] px-2">Quality & Bitrate</p>
-                              <div className="grid grid-cols-3 gap-3">
-                                {[
-                                  { id: '720p', label: 'HD 720p', bitrate: '2.5 Mbps' },
-                                  { id: '1080p', label: 'FULL HD', bitrate: '6.0 Mbps' },
-                                  { id: '4K', label: 'ULTRA 4K', bitrate: '25 Mbps' }
-                                ].map((q) => (
-                                  <button 
-                                    key={q.id}
-                                    onClick={() => {
-                                      setStreamQuality(q.id);
-                                      handleUpdateRoomSettings({ 'settings.streamQuality': q.id });
-                                    }}
-                                    className={cn(
-                                      "flex flex-col items-center justify-center p-4 rounded-3xl border transition-all gap-1",
-                                      streamQuality === q.id 
-                                        ? "bg-amber-400 border-amber-400 text-black shadow-lg shadow-amber-400/20" 
-                                        : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
-                                    )}
-                                  >
-                                    <span className="text-[10px] font-black uppercase tracking-tighter">{q.label}</span>
-                                    <span className={cn("text-[8px] font-bold", streamQuality === q.id ? "text-black/60" : "text-zinc-600")}>{q.bitrate}</span>
-                                  </button>
-                                ))}
-                              </div>
                             </div>
                         </div>
                       </section>
@@ -1603,6 +1621,196 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                     </motion.div>
                   )}
 
+                  {activeConsoleTab === 'permissions' && (
+                    <motion.div
+                      key="permissions-tab"
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      className="space-y-12"
+                    >
+                      {/* Global Control Center */}
+                      <section className="space-y-4">
+                        <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Room Guard Center</h3>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] p-6 space-y-6">
+                           <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="bg-red-500/10 p-2 rounded-xl text-red-500">
+                                <MicOff className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <p className="text-white text-xs font-bold tracking-tight">Mute All Participants</p>
+                                <p className="text-zinc-500 text-[8px] font-black uppercase tracking-widest mt-0.5">Instant global silence</p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                const newSeats = seats.map(s => s.occupied ? { ...s, user: { ...s.user, isMuted: true } } : s);
+                                setSeats(newSeats);
+                                handleUpdateRoomSettings({ seats: newSeats });
+                              }}
+                              className="bg-zinc-800 px-4 py-2 rounded-xl text-[9px] font-black text-white uppercase tracking-widest hover:bg-zinc-700 transition-all border border-zinc-700/50 active:scale-95"
+                            >
+                              Apply
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="bg-amber-400/10 p-2 rounded-xl text-amber-400">
+                                <Lock className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <p className="text-white text-xs font-bold tracking-tight">Lock Empty Seats</p>
+                                <p className="text-zinc-500 text-[8px] font-black uppercase tracking-widest mt-0.5">Prevent new joins</p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                const newSeats = seats.map(s => !s.occupied ? { ...s, isLocked: true } : s);
+                                setSeats(newSeats);
+                                handleUpdateRoomSettings({ seats: newSeats });
+                              }}
+                              className="bg-zinc-800 px-4 py-2 rounded-xl text-[9px] font-black text-white uppercase tracking-widest hover:bg-zinc-700 transition-all border border-zinc-700/50 active:scale-95"
+                            >
+                              Lock All
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-4 border-t border-zinc-800/50">
+                            <div className="flex items-center gap-3">
+                              <div className="bg-blue-500/10 p-2 rounded-xl text-blue-500">
+                                <ShieldAlert className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <p className="text-white text-xs font-bold tracking-tight">Clear Chat History</p>
+                                <p className="text-zinc-500 text-[8px] font-black uppercase tracking-widest mt-0.5">Atomic purge of all messages</p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={async () => {
+                                if (window.confirm('Purge all chat history?')) {
+                                  // Simplified logic: delete docs in messages collection
+                                  // In simulation, we just clear the local state if it's a simulated room
+                                  setMessages([]);
+                                }
+                              }}
+                              className="bg-zinc-800 px-4 py-2 rounded-xl text-[9px] font-black text-white uppercase tracking-widest hover:bg-red-500 transition-all border border-zinc-700/50 active:scale-95"
+                            >
+                              Purge
+                            </button>
+                          </div>
+                        </div>
+                      </section>
+
+                      {/* Participant Permission Grid */}
+                      <section className="space-y-4">
+                        <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Participant Permissions</h3>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] overflow-hidden">
+                          <div className="p-4 bg-black/40 border-b border-zinc-800 flex items-center justify-between px-6">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500 italic">User Identity</span>
+                            <div className="flex gap-8 px-2">
+                               <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500 italic">Talk</span>
+                               <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500 italic">Cam</span>
+                               <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500 italic">Expel</span>
+                            </div>
+                          </div>
+                          <div className="divide-y divide-zinc-800/50 max-h-[400px] overflow-y-auto no-scrollbar">
+                            {seats.filter(s => s.occupied && s.user).map(s => (
+                              <div key={s.user.name} className="p-4 px-6 flex items-center justify-between hover:bg-white/5 transition-all group">
+                                <div className="flex items-center gap-3">
+                                  <div className="relative">
+                                    <img src={s.user.avatar} className="w-8 h-8 rounded-xl object-cover grayscale group-hover:grayscale-0 transition-all" />
+                                    {s.user.name === room.host && (
+                                       <div className="absolute -top-1 -left-1 bg-amber-400 p-0.5 rounded-full ring-2 ring-zinc-950">
+                                         <Star className="w-2 h-2 text-black fill-current" />
+                                       </div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-white text-xs font-bold tracking-tight">{s.user.name}</p>
+                                    <p className="text-[7px] text-zinc-500 font-black uppercase tracking-[0.2em]">{s.user.name === room.host ? 'Room Owner' : 'Verified User'}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-10">
+                                  <button 
+                                    onClick={() => muteUser(s.user.name)} 
+                                    className={cn(
+                                      "p-2 rounded-lg transition-all active:scale-90", 
+                                      s.user.isMuted ? "text-red-500 bg-red-500/10" : "text-zinc-600 hover:text-green-500 hover:bg-green-500/10"
+                                    )}
+                                  >
+                                    {s.user.isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                                  </button>
+                                  <button 
+                                    onClick={() => toggleVideoUser(s.user.name)} 
+                                    className={cn(
+                                      "p-2 rounded-lg transition-all active:scale-90", 
+                                      !s.user.videoEnabled ? "text-red-500 bg-red-500/10" : "text-zinc-600 hover:text-green-500 hover:bg-green-500/10"
+                                    )}
+                                  >
+                                    {!s.user.videoEnabled ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+                                  </button>
+                                  <button 
+                                    onClick={() => s.user.name !== room.host && kickUser(s.user.name)} 
+                                    disabled={s.user.name === room.host}
+                                    className={cn(
+                                      "p-2 rounded-lg transition-all active:scale-90",
+                                      s.user.name === room.host ? "opacity-20 cursor-not-allowed" : "text-zinc-600 hover:text-orange-500 hover:bg-orange-500/10"
+                                    )}
+                                  >
+                                    <ShieldAlert className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                            {seats.filter(s => s.occupied && s.user).length === 0 && (
+                              <div className="p-12 text-center">
+                                <p className="text-zinc-700 text-[10px] font-black uppercase tracking-[0.3em] italic">No active participants</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </section>
+
+                      {/* Blacklist Management */}
+                      <section className="space-y-4">
+                        <div className="flex items-center justify-between px-2">
+                           <h3 className="text-[10px] font-black text-red-500/60 uppercase tracking-[0.3em]">Room Blacklist</h3>
+                           <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">{bannedUsers.length} ENTRIES</span>
+                        </div>
+                        <div className="bg-zinc-900 border border-red-900/10 rounded-[2.5rem] p-6 space-y-4">
+                          {bannedUsers.length > 0 ? (
+                            bannedUsers.map(bannedUser => (
+                              <div key={bannedUser} className="flex items-center justify-between p-4 rounded-2xl bg-black/40 border border-zinc-800/50 group">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 group-hover:bg-red-500 group-hover:text-white transition-all">
+                                    <Slash className="w-4 h-4" />
+                                  </div>
+                                  <div>
+                                    <p className="text-zinc-300 text-xs font-bold">{bannedUser}</p>
+                                    <span className="text-red-500/60 text-[8px] font-black uppercase tracking-widest">Permanent Ban</span>
+                                  </div>
+                                </div>
+                                <button 
+                                  onClick={() => unbanUser(bannedUser)}
+                                  className="text-zinc-500 hover:text-white bg-zinc-800/50 hover:bg-zinc-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95"
+                                >
+                                  Pardon
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8">
+                              <ShieldCheck className="w-10 h-10 text-zinc-900 mx-auto mb-3" />
+                              <p className="text-zinc-700 text-[10px] font-black uppercase tracking-widest italic">Zero Banned Entities</p>
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    </motion.div>
+                  )}
+
                   {activeConsoleTab === 'settings' && (
                     <motion.div
                       key="settings-tab"
@@ -1633,6 +1841,37 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                 className="w-full bg-transparent px-4 py-3 text-white text-xs font-bold outline-none"
                               />
                             </div>
+                          </div>
+                        </div>
+                      </section>
+
+                      {/* Stream Quality & Bitrate */}
+                      <section className="space-y-4">
+                        <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Stream Quality & Bitrate</h3>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] p-6 space-y-4">
+                          <div className="grid grid-cols-3 gap-3">
+                            {[
+                              { id: '720p', label: 'HD 720p', bitrate: '2.5 Mbps' },
+                              { id: '1080p', label: 'FULL HD', bitrate: '6.0 Mbps' },
+                              { id: '4K', label: 'ULTRA 4K', bitrate: '25 Mbps' }
+                            ].map((q) => (
+                              <button 
+                                key={q.id}
+                                onClick={() => {
+                                  setStreamQuality(q.id);
+                                  handleUpdateRoomSettings({ 'settings.streamQuality': q.id });
+                                }}
+                                className={cn(
+                                  "flex flex-col items-center justify-center p-4 rounded-3xl border transition-all gap-1",
+                                  streamQuality === q.id 
+                                    ? "bg-amber-400 border-amber-400 text-black shadow-lg shadow-amber-400/20" 
+                                    : "bg-zinc-950 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                                )}
+                              >
+                                <span className="text-[10px] font-black uppercase tracking-tighter">{q.label}</span>
+                                <span className={cn("text-[8px] font-bold", streamQuality === q.id ? "text-black/60" : "text-zinc-600")}>{q.bitrate}</span>
+                              </button>
+                            ))}
                           </div>
                         </div>
                       </section>

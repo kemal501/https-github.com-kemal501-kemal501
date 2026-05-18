@@ -12,6 +12,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 export default function AdminPanel() {
   const [mintTarget, setMintTarget] = React.useState('');
   const [mintAmount, setMintAmount] = React.useState('');
+  const [mintReason, setMintReason] = React.useState('');
   const [isMinting, setIsMinting] = React.useState(false);
 
   const [logs] = React.useState([
@@ -24,16 +25,27 @@ export default function AdminPanel() {
     if (!mintTarget || !mintAmount) return;
     setIsMinting(true);
     try {
-      const userRef = doc(db, 'users', mintTarget);
-      await updateDoc(userRef, {
-        coins: increment(parseInt(mintAmount))
+      const res = await fetch("/api/admin/generate-coins", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: mintTarget, 
+          amount: parseInt(mintAmount), 
+          reason: mintReason,
+          adminSecret: "TEMPORARY_SECRET" // In a real app, this would be handled better
+        })
       });
-      // Add log
-      alert(`Minted ${mintAmount} to ${mintTarget}`);
-      setMintTarget('');
-      setMintAmount('');
+      const data = await res.json();
+      if (data.success) {
+        alert(`Minted ${mintAmount} to ${mintTarget}`);
+        setMintTarget('');
+        setMintAmount('');
+        setMintReason('');
+      } else {
+        alert(data.error);
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${mintTarget}`);
+      console.error(error);
     } finally {
       setIsMinting(false);
     }
@@ -79,15 +91,27 @@ export default function AdminPanel() {
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white focus:outline-none focus:border-amber-400 transition-all font-mono text-sm"
             />
           </div>
-          <div>
-            <label className="text-zinc-500 text-[10px] font-black uppercase mb-2 block px-2">Amount</label>
-            <input 
-              type="number" 
-              placeholder="0"
-              value={mintAmount}
-              onChange={(e) => setMintAmount(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white focus:outline-none focus:border-amber-400 transition-all font-mono text-sm"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-zinc-500 text-[10px] font-black uppercase mb-2 block px-2">Amount</label>
+              <input 
+                type="number" 
+                placeholder="0"
+                value={mintAmount}
+                onChange={(e) => setMintAmount(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white focus:outline-none focus:border-amber-400 transition-all font-mono text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-zinc-500 text-[10px] font-black uppercase mb-2 block px-2">Reason (Log)</label>
+              <input 
+                type="text" 
+                placeholder="Legacy sync..."
+                value={mintReason}
+                onChange={(e) => setMintReason(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white focus:outline-none focus:border-amber-400 transition-all text-xs"
+              />
+            </div>
           </div>
           <button 
             onClick={handleMintCoins}

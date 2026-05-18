@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Trash2, AtSign, User, Sparkles, ChevronDown, Settings, Users, Shield, Lock, Bell, Ghost, Sparkle } from 'lucide-react';
+import { Send, Trash2, AtSign, User, Sparkles, ChevronDown, Settings, Users, Shield, Lock, Bell, Ghost, Sparkle, Coins } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { auth } from '../lib/firebase';
 
@@ -24,8 +24,9 @@ interface ChatSidebarProps {
   isHost?: boolean;
   users: { name: string, avatar: string | null }[];
   roomHost: string;
-  seats?: { id: number, occupied: boolean, user: any }[];
+  seats?: { id: number, occupied: boolean, user: any, isLocked?: boolean }[];
   onUpdateRoom?: (updates: any) => void;
+  onSeatClick?: (seat: any) => void;
   roomData?: any;
 }
 
@@ -38,6 +39,7 @@ export default function ChatSidebar({
   roomHost,
   seats = [],
   onUpdateRoom,
+  onSeatClick,
   roomData
 }: ChatSidebarProps) {
   const [text, setText] = React.useState('');
@@ -260,29 +262,33 @@ export default function ChatSidebar({
             
             <div className="grid grid-cols-4 gap-2">
               {seats.map((seat) => (
-                <div 
+                <button 
                   key={seat.id}
+                  onClick={() => onSeatClick?.(seat)}
                   className={cn(
-                    "aspect-square rounded-xl border flex items-center justify-center relative transition-all group",
-                    seat.occupied ? "bg-zinc-900 border-zinc-800" : "bg-black/40 border-zinc-900 border-dashed"
+                    "aspect-square rounded-xl border flex items-center justify-center relative transition-all group overflow-hidden",
+                    seat.occupied ? "bg-zinc-900 border-zinc-800" : "bg-black/40 border-zinc-900 border-dashed hover:border-zinc-700 hover:bg-zinc-900/50"
                   )}
                 >
                   {seat.occupied ? (
                     <img 
                       src={seat.user?.avatar || `https://i.pravatar.cc/100?u=${seat.id}`} 
                       alt="User" 
-                      className="w-full h-full object-cover rounded-xl"
+                      className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <span className="text-[8px] font-black text-zinc-800 group-hover:text-zinc-600 transition-colors">{seat.id + 1}</span>
-                  )}
-                  {seat.occupied && seat.user?.isMuted && (
-                    <div className="absolute -bottom-0.5 -right-0.5 bg-red-500 w-3 h-3 rounded-full border border-black flex items-center justify-center">
-                      <Lock className="w-1.5 h-1.5 text-white" />
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[10px] font-black text-zinc-700 group-hover:text-amber-400 transition-colors uppercase italic">{seat.id + 1}</span>
+                      {seat.isLocked && <Lock className="w-2 h-2 text-zinc-800" />}
                     </div>
                   )}
-                </div>
+                  {seat.occupied && (
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
+                    </div>
+                  )}
+                </button>
               ))}
             </div>
           </section>

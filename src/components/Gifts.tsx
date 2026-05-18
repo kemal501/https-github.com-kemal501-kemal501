@@ -7,6 +7,8 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Diamond, Coins, Heart, Flame, Star, Zap, Trophy, Plus, CreditCard, ChevronLeft, Loader2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { doc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
 
 const GIFTS = [
   { id: '1', name: 'Love', price: 10, icon: Heart, color: 'text-red-500' },
