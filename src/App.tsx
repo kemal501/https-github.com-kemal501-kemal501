@@ -20,7 +20,7 @@ import CreateRoomModal from './components/CreateRoomModal';
 import FaceVerification from './components/FaceVerification';
 import { cn } from './lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
-import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, where } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 
 // --- MOCK COMPONENTS ---
@@ -169,7 +169,13 @@ export default function App() {
 
   // Sync Rooms from Firestore
   React.useEffect(() => {
-    const q = firestoreQuery(collection(db, 'rooms'), firestoreOrderBy('createdAt', 'desc'), firestoreLimit(20));
+    if (!currentUser) return;
+    const q = firestoreQuery(
+      collection(db, 'rooms'), 
+      where('isPrivate', '==', false),
+      firestoreOrderBy('createdAt', 'desc'), 
+      firestoreLimit(20)
+    );
     const unsub = onSnapshot(q, (snapshot) => {
       const dbRooms = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -180,7 +186,7 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'rooms');
     });
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -213,8 +219,11 @@ export default function App() {
 
   // Sync popular hosts verified status from DB
   React.useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const dbUsers = snapshot.docs.map(doc => doc.data());
+    if (!currentUser) return;
+    const unsub = onSnapshot(
+      firestoreQuery(collection(db, 'users'), where('isVerified', '==', true)), 
+      (snapshot) => {
+        const dbUsers = snapshot.docs.map(doc => doc.data());
       setPopularHosts(prevHosts => prevHosts.map(host => {
         const dbUser = dbUsers.find(u => u.displayName === host.name || u.uid === host.name);
         if (dbUser) {
@@ -222,9 +231,11 @@ export default function App() {
         }
         return host;
       }));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'users');
     });
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
   const categories = [
     { name: 'All', icon: Sparkles },

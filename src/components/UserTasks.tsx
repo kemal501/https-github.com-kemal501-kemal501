@@ -22,46 +22,92 @@ export default function UserTasks() {
   const [claimingId, setClaimingId] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<'all' | 'available' | 'in-progress' | 'completed' | 'locked'>('all');
   const [earningsSort, setEarningsSort] = React.useState<{ field: 'date' | 'amount', order: 'asc' | 'desc' }>({ field: 'date', order: 'desc' });
-  const [registrationDate] = React.useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 2); // Simulating 2 days old user
-    return d;
-  });
-
+  const [registrationDate, setRegistrationDate] = React.useState<Date>(new Date());
   const isNewUser = (new Date().getTime() - registrationDate.getTime()) < (8 * 24 * 60 * 60 * 1000);
 
-  const [tasks, setTasks] = React.useState<Task[]>([
-    {
-      id: 'verification',
-      title: 'Face Verification',
-      description: 'Verify your identity to unlock earning capabilities.',
-      reward: 500,
-      progress: 0,
-      target: 1,
-      type: 'onboarding',
-      status: 'available'
-    },
-    {
-      id: 'engagement',
-      title: 'Active Streamer/Listener',
-      description: 'Create or Join a room and stay active for 2 hours.',
-      reward: isNewUser ? 20000 : 10000,
-      progress: 45, // minutes
-      target: 120, // minutes
-      type: 'daily',
-      status: 'locked'
-    },
-    {
-      id: 'daily-bonus',
-      title: 'Daily Bonus',
-      description: 'Claim your daily free coins!',
-      reward: 500,
-      progress: 0,
-      target: 1,
-      type: 'daily',
-      status: 'available'
-    }
-  ]);
+  const [tasks, setTasks] = React.useState<Task[]>([]);
+  const [userCoins, setUserCoins] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+
+    // Listen to user coins and registration
+    const unsubUser = onSnapshot(doc(db, 'users', auth.currentUser.uid), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setUserCoins(data.coins || 0);
+        setIsFaceVerified(data.isFaceVerified || false);
+        if (data.createdAt) {
+          setRegistrationDate(data.createdAt.toDate());
+        }
+      }
+    });
+
+    // Listen to tasks
+    const tasksRef = collection(db, 'tasks');
+    const unsubTasks = onSnapshot(tasksRef, async (snap) => {
+      const allTasks = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      
+      // Check completions for each task
+      const tasksWithStatus = await Promise.all(allTasks.map(async (task) => {
+        const completionRef = doc(db, 'users', auth.currentUser!.uid, 'task_completions', task.id);
+        const completionSnap = await getDoc(completionRef);
+        
+        let status = task.status;
+        let progress = task.progress || 0;
+
+        if (completionSnap.exists()) {
+          status = 'completed';
+          progress = task.target;
+        } else if (task.id === 'engagement' && !isFaceVerified) {
+          status = 'locked';
+        }
+
+        return {
+          ...task,
+          status,
+          progress
+        } as Task;
+      }));
+
+      // Add local default tasks if they don't exist in DB yet
+      const defaultTasks: Task[] = [
+        {
+          id: 'daily-bonus',
+          title: 'Daily Bonus',
+          description: 'Claim your daily free coins!',
+          reward: 500,
+          progress: 0,
+          target: 1,
+          type: 'daily',
+          status: 'available'
+        },
+        {
+          id: 'engagement',
+          title: 'Active Host/Listener',
+          description: 'Stay active in room for 1 hour.',
+          reward: isNewUser ? 2000 : 1000,
+          progress: 0,
+          target: 60,
+          type: 'daily',
+          status: isFaceVerified ? 'available' : 'locked'
+        }
+      ];
+
+      // Merge and filter
+      const merged = [...tasksWithStatus];
+      defaultTasks.forEach(dt => {
+        if (!merged.find(m => m.id === dt.id)) merged.push(dt);
+      });
+
+      setTasks(merged);
+    });
+
+    return () => {
+      unsubUser();
+      unsubTasks();
+    };
+  }, [isFaceVerified]);
 
   const claimReward = async (task: Task) => {
     if (!auth.currentUser) return;
@@ -69,7 +115,7 @@ export default function UserTasks() {
     const userId = auth.currentUser.uid;
     
     try {
-      // Check if already claimed today
+      // Check if already claimed today for certain tasks
       const completionRef = doc(db, 'users', userId, 'task_completions', task.id);
       const completionSnap = await getDoc(completionRef);
       
@@ -78,9 +124,8 @@ export default function UserTasks() {
         const lastClaimed = data.completedAt?.toDate();
         const today = new Date();
         if (lastClaimed && lastClaimed.toDateString() === today.toDateString()) {
-          console.log('Already claimed today');
-          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'completed' } : t));
-          return;
+           // If it's a non-recurring task or already claimed today
+           return;
         }
       }
 
@@ -93,9 +138,15 @@ export default function UserTasks() {
         coins: increment(task.reward)
       });
 
-      setTasks(prev => prev.map(t => 
-        t.id === task.id ? { ...t, status: 'completed', progress: t.target } : t
-      ));
+      // Record transaction
+      await addDoc(collection(db, 'users', userId, 'transactions'), {
+        type: 'reward',
+        amount: task.reward,
+        description: `Completed: ${task.title}`,
+        createdAt: serverTimestamp(),
+        status: 'completed'
+      });
+
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${userId}/task_completions/${task.id}`);
     } finally {
@@ -204,6 +255,18 @@ export default function UserTasks() {
 
   // Remove auto-claim logic
   const [taskToConfirm, setTaskToConfirm] = React.useState<Task | null>(null);
+  const [transactions, setTransactions] = React.useState<any[]>([]);
+
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const transRef = collection(db, 'users', auth.currentUser.uid, 'transactions');
+    const unsub = onSnapshot(transRef, (snap) => {
+      setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data(), date: d.data().createdAt?.toDate() || new Date() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${auth.currentUser?.uid}/transactions`);
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <div className="space-y-8 p-6">
@@ -454,12 +517,7 @@ export default function UserTasks() {
         </header>
 
         <div className="grid grid-cols-1 gap-4">
-          {[
-            { id: 'e1', type: 'gift', source: 'Diamond Ring', amount: 1200, date: new Date('2024-03-16') },
-            { id: 'e2', type: 'entry_fee', source: 'Elite Room Entry', amount: 450, date: new Date('2024-03-15') },
-            { id: 'e3', type: 'gift', source: 'Super Car', amount: 5000, date: new Date('2024-03-14') },
-            { id: 'e4', type: 'gift', source: 'Magic Hat', amount: 150, date: new Date('2024-03-17') },
-          ].sort((a, b) => {
+          {transactions.sort((a, b) => {
             const factor = earningsSort.order === 'desc' ? -1 : 1;
             if (earningsSort.field === 'date') return (a.date.getTime() - b.date.getTime()) * factor;
             return (a.amount - b.amount) * factor;
@@ -470,10 +528,10 @@ export default function UserTasks() {
                   "w-10 h-10 rounded-2xl flex items-center justify-center",
                   earning.type === 'gift' ? "bg-purple-500/10 text-purple-400" : "bg-blue-500/10 text-blue-400"
                 )}>
-                  {earning.type === 'gift' ? <Star className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
+                  {earning.type === 'gift' ? <Star className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h4 className="text-white text-[11px] font-black uppercase italic tracking-tight">{earning.source}</h4>
+                  <h4 className="text-white text-[11px] font-black uppercase italic tracking-tight">{earning.source || earning.description}</h4>
                   <p className="text-zinc-500 text-[8px] font-black uppercase tracking-widest">{earning.type.replace('_', ' ')}</p>
                 </div>
               </div>
@@ -486,6 +544,11 @@ export default function UserTasks() {
               </div>
             </div>
           ))}
+          {transactions.length === 0 && (
+            <div className="text-center py-12 bg-zinc-900/10 rounded-[2.5rem] border border-dashed border-zinc-800">
+               <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">No transactions yet</p>
+            </div>
+          )}
         </div>
       </section>
 

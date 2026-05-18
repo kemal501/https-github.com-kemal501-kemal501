@@ -23,10 +23,37 @@ export default function CreateRoomModal({ isOpen, onClose, onRoomCreated }: Crea
   const [entryFee, setEntryFee] = React.useState<number>(0);
   const [password, setPassword] = React.useState('');
   const [isCreating, setIsCreating] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const PROHIBITED_WORDS = ['scam', 'abuse', 'spam', 'hack', 'admin', 'official', 'support', 'owner', 'system', 'root'];
+
+  const validate = () => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) return 'Room title is required';
+    if (trimmedTitle.length < 3) return 'Title must be at least 3 characters';
+    
+    const hasProhibited = PROHIBITED_WORDS.some(word => 
+      trimmedTitle.toLowerCase().includes(word.toLowerCase())
+    );
+    if (hasProhibited) return 'Title contains restricted words';
+
+    if (privacy === 'private') {
+      if (!password) return 'Password is required for private rooms';
+      if (password.length < 4) return 'Password must be at least 4 characters';
+    }
+
+    return null;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !auth.currentUser) return;
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setError(null);
+    if (!auth.currentUser) return;
 
     setIsCreating(true);
     const roomId = 'room_' + Math.random().toString(36).slice(2, 9);
@@ -113,17 +140,39 @@ export default function CreateRoomModal({ isOpen, onClose, onRoomCreated }: Crea
                 <form onSubmit={handleSubmit} className="space-y-6">
                   {/* Room Title */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest px-1">Room Title</label>
+                    <div className="flex items-center justify-between px-1">
+                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Room Title</label>
+                      <span className={cn("text-[9px] font-bold uppercase", title.length > 35 ? "text-amber-500" : "text-zinc-700")}>
+                        {title.length}/40
+                      </span>
+                    </div>
                     <input
                       type="text"
                       placeholder="e.g. My Chill Zone 🌙"
                       value={title}
-                      onChange={(e) => setTitle(e.target.value)}
+                      onChange={(e) => {
+                        setTitle(e.target.value);
+                        if (error) setError(null);
+                      }}
                       className="w-full bg-black border border-zinc-800 rounded-2xl py-4 px-6 text-white text-sm focus:outline-none focus:border-amber-400 transition-all placeholder:text-zinc-800"
                       maxLength={40}
                       autoFocus
                     />
                   </div>
+
+                  <AnimatePresence>
+                    {error && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="bg-red-500/10 border border-red-500/20 py-2 px-4 rounded-xl flex items-center gap-2"
+                      >
+                        <div className="w-1 h-1 bg-red-500 rounded-full animate-pulse" />
+                        <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">{error}</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
                   {/* Room Type */}
                   <div className="space-y-2">
@@ -165,7 +214,10 @@ export default function CreateRoomModal({ isOpen, onClose, onRoomCreated }: Crea
                       <div className="flex bg-black border border-zinc-800 rounded-2xl p-1">
                         <button
                           type="button"
-                          onClick={() => setPrivacy('public')}
+                          onClick={() => {
+                            setPrivacy('public');
+                            if (error) setError(null);
+                          }}
                           className={cn(
                             "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest",
                             privacy === 'public' ? "bg-zinc-800 text-white shadow-lg" : "text-zinc-600 hover:text-zinc-400"
@@ -176,7 +228,10 @@ export default function CreateRoomModal({ isOpen, onClose, onRoomCreated }: Crea
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPrivacy('private')}
+                          onClick={() => {
+                            setPrivacy('private');
+                            if (error) setError(null);
+                          }}
                           className={cn(
                             "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest",
                             privacy === 'private' ? "bg-purple-500/20 text-purple-400 border border-purple-500/30" : "text-zinc-600 hover:text-zinc-400"
@@ -219,7 +274,10 @@ export default function CreateRoomModal({ isOpen, onClose, onRoomCreated }: Crea
                             type="password"
                             placeholder="Enter access code..."
                             value={password}
-                            onChange={(e) => setPassword(e.target.value)}
+                            onChange={(e) => {
+                              setPassword(e.target.value);
+                              if (error) setError(null);
+                            }}
                             className="w-full bg-black border border-purple-500/20 rounded-2xl py-4 pl-11 pr-4 text-white text-sm focus:outline-none focus:border-purple-500 transition-all placeholder:text-zinc-800"
                           />
                         </div>
@@ -230,12 +288,11 @@ export default function CreateRoomModal({ isOpen, onClose, onRoomCreated }: Crea
                   <div className="pt-4">
                     <button
                       type="submit"
-                      disabled={!title.trim() || isCreating}
+                      disabled={isCreating}
                       className={cn(
                         "w-full py-5 rounded-[2rem] font-black uppercase tracking-[0.3em] text-xs transition-all flex items-center justify-center gap-2 shadow-2xl",
-                        !title.trim() 
-                          ? "bg-zinc-800 text-zinc-600 cursor-not-allowed" 
-                          : "bg-gradient-to-r from-amber-400 to-orange-600 text-white shadow-orange-600/30 hover:scale-[1.02] active:scale-[0.98]"
+                        "bg-gradient-to-r from-amber-400 to-orange-600 text-white shadow-orange-600/30 hover:scale-[1.02] active:scale-[0.98]",
+                        isCreating && "opacity-50 cursor-not-allowed"
                       )}
                     >
                       {isCreating ? (

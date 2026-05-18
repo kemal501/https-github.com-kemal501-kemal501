@@ -5,9 +5,10 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key } from 'lucide-react';
+import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key, ChevronDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 import Gifts from './Gifts';
+import ChatSidebar from './ChatSidebar';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, getDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
@@ -35,14 +36,8 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const [seats, setSeats] = React.useState<{ id: number, occupied: boolean, user: any, isLocked?: boolean }[]>(() => 
     Array.from({ length: 24 }).map((_, i) => ({
       id: i,
-      occupied: i < 3,
-      user: i < 3 ? { 
-        name: i === 0 ? room.host : (i === 1 ? 'Melat' : 'Guest_2'), 
-        avatar: `https://i.pravatar.cc/100?u=${i}`,
-        videoEnabled: i === 0,
-        isMuted: false,
-        voiceEffect: 'none'
-      } : null,
+      occupied: false,
+      user: null,
       isLocked: false
     }))
   );
@@ -145,6 +140,9 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const [isBgmEnabled, setIsBgmEnabled] = React.useState(true);
   const [activeSeatInfoId, setActiveSeatInfoId] = React.useState<number | null>(null);
   const [roomPassword, setRoomPassword] = React.useState('');
+  const [showChat, setShowChat] = React.useState(true);
+  const [chatLimit, setChatLimit] = React.useState(50);
+  const [isLoadingMore, setIsLoadingMore] = React.useState(false);
 
   const handleUpdateRoomSettings = async (updates: any) => {
     if (room.id.startsWith('room_')) return;
@@ -491,7 +489,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     if (room.id.startsWith('room_')) return;
 
     const messagesRef = collection(db, 'rooms', room.id, 'messages');
-    const q = firestoreQuery(messagesRef, firestoreOrderBy('createdAt', 'asc'), firestoreLimit(50));
+    const q = firestoreQuery(messagesRef, firestoreOrderBy('createdAt', 'asc'), firestoreLimit(chatLimit));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const newMessages = snapshot.docs.map(doc => ({
@@ -499,23 +497,26 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
         ...doc.data()
       })) as Message[];
       setMessages(newMessages);
+      setIsLoadingMore(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `rooms/${room.id}/messages`);
+      setIsLoadingMore(false);
     });
 
     return () => unsubscribe();
-  }, [room.id]);
+  }, [room.id, chatLimit]);
 
   // Scroll to bottom when messages change
   React.useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendMessage = async () => {
-    if (!chatMessage.trim() || !auth.currentUser) return;
+  const handleSendMessage = async (text?: string) => {
+    const messageText = typeof text === 'string' ? text : chatMessage;
+    if (!messageText.trim() || !auth.currentUser) return;
 
-    const originalMessage = chatMessage;
-    setChatMessage('');
+    const originalMessage = messageText;
+    if (typeof text !== 'string') setChatMessage('');
 
     if (room.id.startsWith('room_')) {
       const newMsg = {
@@ -544,13 +545,25 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
 
   const handleSendGift = async (gift: any, target: 'host' | 'self') => {
     if (!auth.currentUser) return;
-    const userRef = doc(db, 'users', auth.currentUser.uid);
+    const senderRef = doc(db, 'users', auth.currentUser.uid);
+    const receiverId = target === 'host' ? roomData?.hostId : auth.currentUser.uid;
+    if (!receiverId) return;
+    const receiverRef = doc(db, 'users', receiverId);
+
     try {
-      const userDoc = await getDoc(userRef);
+      const userDoc = await getDoc(senderRef);
       if (userDoc.exists() && userDoc.data().coins >= gift.price) {
-        await updateDoc(userRef, {
-          coins: userDoc.data().coins - gift.price // Simple subtraction instead of increment, given our mocks
+        // Atomic transaction replacement
+        await updateDoc(senderRef, {
+          coins: increment(-gift.price)
         });
+        
+        // If target is host, increment their coins too
+        if (target === 'host' && receiverId !== auth.currentUser.uid) {
+           await updateDoc(receiverRef, {
+             coins: increment(gift.price)
+           });
+        }
         
         setActiveGift(gift);
         setTimeout(() => setActiveGift(null), 3500);
@@ -563,16 +576,28 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
           createdAt: serverTimestamp()
         });
 
-        // Record it in earnings section for the target
-        const transactionRef = collection(db, 'users', auth.currentUser.uid, 'transactions');
-        await addDoc(transactionRef, {
+        // Record it in transactions for both
+        await addDoc(collection(db, 'users', auth.currentUser.uid, 'transactions'), {
           fromId: auth.currentUser.uid,
-          toId: target === 'host' ? room.host : auth.currentUser.uid,
+          toId: receiverId,
           amount: gift.price,
           type: 'gift',
           status: 'completed',
+          description: `Gift Sent: ${gift.name}`,
           createdAt: serverTimestamp()
         });
+
+        if (target === 'host' && receiverId !== auth.currentUser.uid) {
+          await addDoc(collection(db, 'users', receiverId, 'transactions'), {
+            fromId: auth.currentUser.uid,
+            toId: receiverId,
+            amount: gift.price,
+            type: 'gift',
+            status: 'completed',
+            description: `Gift Received: ${gift.name}`,
+            createdAt: serverTimestamp()
+          });
+        }
       } else {
         alert('Not enough coins!');
       }
@@ -710,9 +735,17 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
         {[
           { icon: <ShieldCheck className="w-6 h-6" />, label: '⚔' },
           { icon: <Coins className="w-6 h-6" />, label: '💰' },
-          { icon: <Gift className="w-6 h-6" />, label: '🎁' }
+          { icon: <Gift className="w-6 h-6" />, label: '🎁' },
+          { icon: <MessageSquare className={cn("w-6 h-6 transition-all", showChat ? "text-amber-400" : "text-white")} />, label: '💬', onClick: () => setShowChat(!showChat) }
         ].map((item, i) => (
-          <div key={i} className="w-14 h-14 bg-black/40 backdrop-blur-md rounded-2xl flex items-center justify-center text-white border border-white/10 hover:border-amber-400 transition-colors cursor-pointer">
+          <div 
+            key={i} 
+            onClick={item.onClick}
+            className={cn(
+              "w-14 h-14 bg-black/40 backdrop-blur-md rounded-2xl flex items-center justify-center text-white border border-white/10 hover:border-amber-400 transition-colors cursor-pointer",
+              item.onClick && "hover:scale-110 active:scale-95"
+            )}
+          >
             {item.icon}
           </div>
         ))}
@@ -776,277 +809,311 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
         </div>
       </div>
 
-      {/* Main Content: 24 Seat Grid */}
-      <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
-        <div className="max-w-4xl mx-auto space-y-8">
-          
-          {/* Top Video Stage (if video) */}
-          {room.type === 'video' && (
-            <div className="aspect-video w-full rounded-[2.5rem] bg-zinc-900 overflow-hidden relative border border-zinc-800 shadow-2xl group">
-              {isStreaming ? (
-                <>
-                  <img 
-                    src={`https://picsum.photos/seed/${room.id}/1280/720`} 
-                    className={cn(
-                      "w-full h-full object-cover transition-opacity duration-700",
-                      isPlaying ? "opacity-80" : "opacity-40 grayscale"
-                    )} 
-                    alt="Stream"
-                    referrerPolicy="no-referrer"
-                  />
-                  
-                  {/* Video Controls Overlay */}
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                    <motion.button 
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => setIsPlaying(!isPlaying)}
-                      className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white shadow-2xl"
-                    >
-                      {isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current ml-1" />}
-                    </motion.button>
-
-                    {/* Bottom Controls Bar */}
-                    <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between">
-                      <div className="flex items-center gap-4 bg-black/40 backdrop-blur-xl p-2 pl-4 rounded-2xl border border-white/5">
-                        <button 
-                          onClick={() => setIsMutedVideo(!isMutedVideo)}
-                          className="text-white hover:text-amber-400 transition-colors"
-                        >
-                          {isMutedVideo || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-                        </button>
-                        <input 
-                          type="range" 
-                          min="0" 
-                          max="100" 
-                          value={isMutedVideo ? 0 : volume}
-                          onChange={(e) => {
-                            setVolume(parseInt(e.target.value));
-                            if (parseInt(e.target.value) > 0) setIsMutedVideo(false);
-                          }}
-                          className="w-24 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer accent-amber-400"
-                        />
-                      </div>
-
-                      <div className="bg-black/40 backdrop-blur-xl px-4 py-2 rounded-2xl border border-white/5">
-                        <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">{streamQuality} HD</span>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950">
-                  <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4">
-                    <VideoOff className="w-8 h-8 text-zinc-700" />
-                  </div>
-                  <p className="text-zinc-600 font-bold uppercase tracking-widest text-xs italic">Stream Paused by Host</p>
-                </div>
-              )}
-              <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-2xl flex items-center gap-2 border border-white/5">
-                <div className={cn("w-2 h-2 rounded-full", isStreaming ? "bg-red-500 animate-pulse" : "bg-zinc-600")} />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">
-                  {isStreaming ? 'Live Stream' : 'Offline'}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Announcement Box */}
-          <div className="bg-black/50 border border-zinc-900 p-6 rounded-[2rem] z-10 backdrop-blur-md">
-            <h3 className="text-red-500 font-black text-xs uppercase tracking-widest mb-2">Announcement</h3>
-            <p className="text-zinc-400 text-xs">
-                Welcome to the voice chat room! Please follow room rules.
-                Be respectful and enjoy chatting together.
-            </p>
-          </div>
-
-          {/* Seat Grid (3 rows of 8 or customized) */}
-          <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4">
-            {seats.map((seat) => (
-              <motion.div 
-                key={seat.id}
-                layout
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ 
-                  opacity: 1, 
-                  scale: 1,
-                  ...(shakingSeatId === seat.id ? { x: [-3, 3, -3, 3, 0], backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.5)' } : {})
-                }}
-                transition={{ duration: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
-                onClick={() => handleSeatClick(seat)}
-                className={cn(
-                  "aspect-square rounded-2xl flex flex-col items-center justify-center gap-1 transition-all border relative cursor-pointer overflow-hidden",
-                  seat.occupied 
-                    ? "bg-zinc-900 border-zinc-800" 
-                    : "bg-zinc-950 border-zinc-900 border-dashed hover:border-zinc-700",
-                  seat.user && blockedUsers.includes(seat.user.name) && "opacity-40 grayscale",
-                  requestedSeats.some(r => r.seatId === seat.id) && "border-amber-400/50 bg-amber-400/5"
-                )}
-              >
-                {activeSeatInfoId === seat.id && (
-                  <SeatOverlay seat={seat} onModerate={() => openModeration(seat)} />
-                )}
-                {seat.occupied ? (
+      {/* Main Content Area */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Gallery / Stage */}
+        <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
+          <div className="max-w-4xl mx-auto space-y-8">
+            
+            {/* Top Video Stage (if video) */}
+            {room.type === 'video' && (
+              <div className="aspect-video w-full rounded-[2.5rem] bg-zinc-900 overflow-hidden relative border border-zinc-800 shadow-2xl group">
+                {isStreaming ? (
                   <>
-                    <AnimatePresence>
-                      {activeEntryEffects.includes(seat.id) && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.5 }}
-                          animate={{ opacity: 1, scale: 1.5 }}
-                          exit={{ opacity: 0, scale: 2 }}
-                          transition={{ duration: 1, repeat: 2 }}
-                          className="absolute inset-0 z-0"
-                        >
-                          <div className="absolute inset-0 bg-amber-400/30 blur-2xl rounded-full" />
-                          <Sparkles className="absolute inset-x-0 mx-auto w-full h-full text-amber-400 opacity-40 animate-spin-slow" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                    <div className="relative w-full h-full flex items-center justify-center p-1 z-10">
-                      {seat.user?.videoEnabled ? (
-                        <div className="w-full h-full rounded-xl overflow-hidden bg-black">
-                          <img 
-                            src={`https://picsum.photos/seed/${seat.user.name}/300/300`} 
-                            className="w-full h-full object-cover opacity-90 animate-pulse" 
-                            alt="User feed"
-                            referrerPolicy="no-referrer"
+                    <img 
+                      src={`https://picsum.photos/seed/${room.id}/1280/720`} 
+                      className={cn(
+                        "w-full h-full object-cover transition-opacity duration-700",
+                        isPlaying ? "opacity-80" : "opacity-40 grayscale"
+                      )} 
+                      alt="Stream"
+                      referrerPolicy="no-referrer"
+                    />
+                    
+                    {/* Video Controls Overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                      <motion.button 
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                        onClick={() => setIsPlaying(!isPlaying)}
+                        className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white shadow-2xl"
+                      >
+                        {isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current ml-1" />}
+                      </motion.button>
+  
+                      {/* Bottom Controls Bar */}
+                      <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between">
+                        <div className="flex items-center gap-4 bg-black/40 backdrop-blur-xl p-2 pl-4 rounded-2xl border border-white/5">
+                          <button 
+                            onClick={() => setIsMutedVideo(!isMutedVideo)}
+                            className="text-white hover:text-amber-400 transition-colors"
+                          >
+                            {isMutedVideo || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                          </button>
+                          <input 
+                            type="range" 
+                            min="0" 
+                            max="100" 
+                            value={isMutedVideo ? 0 : volume}
+                            onChange={(e) => {
+                              setVolume(parseInt(e.target.value));
+                              if (parseInt(e.target.value) > 0) setIsMutedVideo(false);
+                            }}
+                            className="w-24 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer accent-amber-400"
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
                         </div>
-                      ) : (
-                        <div className="relative">
-                          <img src={seat.user?.avatar} alt="User" className="w-10 h-10 rounded-full border-2 border-amber-400/20" />
+  
+                        <div className="bg-black/40 backdrop-blur-xl px-4 py-2 rounded-2xl border border-white/5">
+                          <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">{streamQuality} HD</span>
                         </div>
-                      )}
-
-                      {/* Voice effect indicator */}
-                      {(seat.user?.voiceEffect && seat.user.voiceEffect !== 'none') || (seat.user?.name === auth.currentUser?.displayName && selectedVoiceEffect !== 'none') ? (
-                        <div className="absolute top-1 left-1 bg-purple-500 w-4 h-4 rounded-full border-2 border-black flex items-center justify-center shadow-lg shadow-purple-500/20">
-                          <Wand2 className="w-2 h-2 text-white animate-pulse" />
-                        </div>
-                      ) : null}
-
-                      {blockedUsers.includes(seat.user?.name || '') ? (
-                        <div className="absolute top-1 right-1 bg-red-500 w-4 h-4 rounded-full border-2 border-black flex items-center justify-center">
-                          <Slash className="w-2 h-2 text-white" />
-                        </div>
-                      ) : (
-                        <div className={cn(
-                          "absolute bottom-0 right-0 w-6 h-6 rounded-full border-2 border-black flex items-center justify-center shadow-md",
-                          seat.user?.isMuted ? "bg-red-500" : (seat.user?.videoEnabled ? "bg-green-500" : "bg-amber-400")
-                        )}>
-                          {seat.user?.isMuted ? (
-                            <MicOff className="w-3 h-3 text-white" />
-                          ) : (
-                            <Mic className="w-3 h-3 text-white" />
-                          )}
-                        </div>
-                      )}
+                      </div>
                     </div>
-                    <span className="absolute bottom-1 text-[7px] font-black text-white/50 uppercase truncate px-1 bg-black/40 backdrop-blur-md rounded-full">
-                      {seat.user?.name}
-                    </span>
                   </>
                 ) : (
-                  <>
-                    <div className={cn(
-                      "w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all",
-                      seat.isLocked
-                        ? "border-red-500/50 bg-red-500/10 text-red-500"
-                        : requestedSeats.includes(seat.id) 
-                          ? "border-amber-400 bg-amber-400/20 text-amber-400 rotate-12" 
-                          : "border-zinc-800/50 text-zinc-800"
-                    )}>
-                      {seat.isLocked ? <Lock className="w-4 h-4" /> : (requestedSeats.some(r => r.seatId === seat.id) ? <Send className="w-4 h-4" /> : <Star className="w-4 h-4" />)}
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950">
+                    <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4">
+                      <VideoOff className="w-8 h-8 text-zinc-700" />
                     </div>
-                    {seat.isLocked ? (
-                       <span className="text-[6px] font-black text-red-500 uppercase tracking-tighter">
-                         Locked
-                       </span>
-                    ) : (
-                      requestedSeats.some(r => r.seatId === seat.id) && (
-                        <span className="text-[6px] font-black text-amber-500 uppercase tracking-tighter animate-pulse">
-                          Request Sent
-                        </span>
-                      )
-                    )}
-                  </>
-                )}
-              </motion.div>
-            ))}
-          </div>
-
-          {/* Virtual Chat Area */}
-          <div className="bg-black/50 border border-zinc-900 p-6 rounded-[2rem] h-[300px] flex flex-col justify-end gap-2 overflow-hidden relative">
-            <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black to-transparent z-10">
-              <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">Live Room Chat</span>
-            </div>
-            
-            <div className="space-y-3 overflow-y-auto no-scrollbar scroll-smooth">
-              <div className="flex gap-3">
-                <span className="text-amber-400 font-black text-xs">System:</span>
-                <p className="text-zinc-500 text-xs">Welcome to Barca-live! Remember to follow community guidelines.</p>
-              </div>
-              
-              {messages.filter(msg => !blockedUsers.includes(msg.senderName)).map((msg) => (
-                <div key={msg.id} className="group flex items-start justify-between gap-3">
-                  <div className="flex gap-3 min-w-0">
-                    <span className={cn(
-                      "font-bold text-xs flex-shrink-0",
-                      msg.senderId === auth.currentUser?.uid ? "text-amber-400" : 
-                      msg.senderName === room.host ? "text-blue-400" : "text-zinc-400"
-                    )}>
-                      {msg.senderName}:
-                    </span>
-                    <p className="text-zinc-300 text-xs break-words">
-                      {msg.text}
-                    </p>
+                    <p className="text-zinc-600 font-bold uppercase tracking-widest text-xs italic">Stream Paused by Host</p>
                   </div>
-                  {isHost && (
-                    <button 
-                      onClick={() => deleteMessage(msg.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  )}
+                )}
+                <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-2xl flex items-center gap-2 border border-white/5">
+                  <div className={cn("w-2 h-2 rounded-full", isStreaming ? "bg-red-500 animate-pulse" : "bg-zinc-600")} />
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">
+                    {isStreaming ? 'Live Stream' : 'Offline'}
+                  </span>
                 </div>
+              </div>
+            )}
+  
+            {/* Announcement Box */}
+            <div className="bg-black/50 border border-zinc-900 p-6 rounded-[2rem] z-10 backdrop-blur-md">
+              <h3 className="text-red-500 font-black text-xs uppercase tracking-widest mb-2">Announcement</h3>
+              <p className="text-zinc-400 text-xs text-balance">
+                  Welcome to the voice chat room! Please follow community guidelines.
+                  Be respectful, avoid spam, and enjoy chatting together.
+              </p>
+            </div>
+  
+            {/* Seat Grid */}
+            <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4">
+              {seats.map((seat) => (
+                <motion.div 
+                  key={seat.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ 
+                    opacity: 1, 
+                    scale: 1,
+                    ...(shakingSeatId === seat.id ? { x: [-3, 3, -3, 3, 0], backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.5)' } : {})
+                  }}
+                  transition={{ duration: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
+                  onClick={() => handleSeatClick(seat)}
+                  className={cn(
+                    "aspect-square rounded-2xl flex flex-col items-center justify-center gap-1 transition-all border relative cursor-pointer overflow-hidden",
+                    seat.occupied 
+                      ? "bg-zinc-900 border-zinc-800" 
+                      : "bg-zinc-950 border-zinc-900 border-dashed hover:border-zinc-700",
+                    seat.user && blockedUsers.includes(seat.user.name) && "opacity-40 grayscale",
+                    requestedSeats.some(r => r.seatId === seat.id) && "border-amber-400/50 bg-amber-400/5"
+                  )}
+                >
+                  {activeSeatInfoId === seat.id && (
+                    <SeatOverlay seat={seat} onModerate={() => openModeration(seat)} />
+                  )}
+                  {seat.occupied ? (
+                    <>
+                      <AnimatePresence>
+                        {activeEntryEffects.includes(seat.id) && (
+                          <motion.div 
+                            initial={{ opacity: 0, scale: 0.5 }}
+                            animate={{ opacity: 1, scale: 1.5 }}
+                            exit={{ opacity: 0, scale: 2 }}
+                            transition={{ duration: 1, repeat: 2 }}
+                            className="absolute inset-0 z-0"
+                          >
+                            <div className="absolute inset-0 bg-amber-400/30 blur-2xl rounded-full" />
+                            <Sparkles className="absolute inset-x-0 mx-auto w-full h-full text-amber-400 opacity-40 animate-spin-slow" />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      <div className="relative w-full h-full flex items-center justify-center p-1 z-10">
+                        {seat.user?.videoEnabled ? (
+                          <div className="w-full h-full rounded-xl overflow-hidden bg-black">
+                            <img 
+                              src={`https://picsum.photos/seed/${seat.user.name}/300/300`} 
+                              className="w-full h-full object-cover opacity-90 animate-pulse" 
+                              alt="User feed"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <img src={seat.user?.avatar} alt="User" className="w-10 h-10 rounded-full border-2 border-amber-400/20" />
+                          </div>
+                        )}
+  
+                        {/* Voice effect indicator */}
+                        {(seat.user?.voiceEffect && seat.user.voiceEffect !== 'none') || (seat.user?.name === auth.currentUser?.displayName && selectedVoiceEffect !== 'none') ? (
+                          <div className="absolute top-1 left-1 bg-purple-500 w-4 h-4 rounded-full border-2 border-black flex items-center justify-center shadow-lg shadow-purple-500/20">
+                            <Wand2 className="w-2 h-2 text-white animate-pulse" />
+                          </div>
+                        ) : null}
+  
+                        {blockedUsers.includes(seat.user?.name || '') ? (
+                          <div className="absolute top-1 right-1 bg-red-500 w-4 h-4 rounded-full border-2 border-black flex items-center justify-center">
+                            <Slash className="w-2 h-2 text-white" />
+                          </div>
+                        ) : (
+                          <div className={cn(
+                            "absolute bottom-0 right-0 w-6 h-6 rounded-full border-2 border-black flex items-center justify-center shadow-md",
+                            seat.user?.isMuted ? "bg-red-500" : (seat.user?.videoEnabled ? "bg-green-500" : "bg-amber-400")
+                          )}>
+                            {seat.user?.isMuted ? (
+                              <MicOff className="w-3 h-3 text-white" />
+                            ) : (
+                              <Mic className="w-3 h-3 text-white" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <span className="absolute bottom-1 text-[7px] font-black text-white/50 uppercase truncate px-1 bg-black/40 backdrop-blur-md rounded-full">
+                        {seat.user?.name}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <div className={cn(
+                        "w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all",
+                        seat.isLocked
+                          ? "border-red-500/50 bg-red-500/10 text-red-500"
+                          : requestedSeats.includes(seat.id) 
+                            ? "border-amber-400 bg-amber-400/20 text-amber-400 rotate-12" 
+                            : "border-zinc-800/50 text-zinc-800"
+                      )}>
+                        {seat.isLocked ? <Lock className="w-4 h-4" /> : (requestedSeats.some(r => r.seatId === seat.id) ? <Send className="w-4 h-4" /> : <Star className="w-4 h-4" />)}
+                      </div>
+                      {seat.isLocked ? (
+                         <span className="text-[6px] font-black text-red-500 uppercase tracking-tighter">
+                           Locked
+                         </span>
+                      ) : (
+                        requestedSeats.some(r => r.seatId === seat.id) && (
+                          <span className="text-[6px] font-black text-amber-500 uppercase tracking-tighter animate-pulse">
+                            Request Sent
+                          </span>
+                        )
+                      )}
+                    </>
+                  )}
+                </motion.div>
               ))}
-              <div ref={chatEndRef} />
             </div>
           </div>
         </div>
+
+        {/* Chat Sidebar Wrapper */}
+        <AnimatePresence>
+          {showChat && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: '100%', maxWidth: '380px', opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="hidden lg:block border-l border-zinc-900 bg-black/20"
+            >
+              <div className="flex flex-col h-full">
+                {messages.length >= chatLimit && (
+                  <button 
+                    onClick={() => {
+                        setChatLimit(prev => prev + 50);
+                        setIsLoadingMore(true);
+                    }}
+                    disabled={isLoadingMore}
+                    className="m-4 py-2 border border-zinc-800 rounded-xl text-[10px] font-black uppercase text-zinc-500 hover:text-white transition-all"
+                  >
+                    {isLoadingMore ? 'Loading...' : 'Load legacy messages'}
+                  </button>
+                )}
+                <ChatSidebar 
+                  messages={messages.filter(msg => !blockedUsers.includes(msg.senderName))} 
+                  onSendMessage={handleSendMessage}
+                  onDeleteMessage={deleteMessage}
+                  isHost={isHost}
+                  roomHost={room.host}
+                  users={seats.filter(s => s.occupied && s.user).map(s => ({ name: s.user.name, avatar: s.user.avatar }))}
+                  seats={seats}
+                  onUpdateRoom={handleUpdateRoomSettings}
+                  roomData={{
+                    ...room,
+                    settings: {
+                      isPrivate,
+                      entryEffectsEnabled,
+                      isBgmEnabled,
+                      entryFee
+                    }
+                  }}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
+
+      {/* Mobile Chat Overlay Toggle */}
+      <div className="lg:hidden absolute bottom-32 right-6 z-[70]">
+         <button 
+           onClick={() => setShowChat(!showChat)}
+           className="w-14 h-14 bg-amber-400 text-black rounded-full shadow-2xl flex items-center justify-center animate-bounce"
+         >
+           <MessageSquare className="w-6 h-6" />
+         </button>
+      </div>
+      
+      {/* Mobile Chat Panel */}
+      <AnimatePresence>
+        {showChat && (
+          <motion.div
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            className="lg:hidden fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col pt-12"
+          >
+            <button 
+              onClick={() => setShowChat(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white"
+            >
+              <ChevronDown className="w-8 h-8" />
+            </button>
+            <div className="flex-1 overflow-hidden">
+               <ChatSidebar 
+                messages={messages.filter(msg => !blockedUsers.includes(msg.senderName))} 
+                onSendMessage={handleSendMessage}
+                onDeleteMessage={deleteMessage}
+                isHost={isHost}
+                roomHost={room.host}
+                users={seats.filter(s => s.occupied && s.user).map(s => ({ name: s.user.name, avatar: s.user.avatar }))}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Control Bar */}
       <div className="p-6 bg-black/80 backdrop-blur-2xl border-t border-zinc-900 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2 flex-1">
-          <div className="relative flex-1">
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="relative"
-            >
-              <input 
-                type="text" 
-                placeholder="Say something..."
-                value={chatMessage}
-                onChange={(e) => setChatMessage(e.target.value)}
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-6 text-white text-sm focus:outline-none focus:border-amber-400/50 transition-all placeholder:text-zinc-600"
-              />
-              <button 
-                type="submit"
-                className={cn(
-                  "absolute right-2 top-2 p-2 rounded-xl transition-all",
-                  chatMessage ? "bg-amber-400 text-black shadow-lg" : "bg-transparent text-zinc-700"
-                )}
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </form>
-          </div>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setShowChat(!showChat)}
+            className={cn(
+              "p-4 rounded-2xl flex items-center gap-2 transition-all",
+              showChat ? "bg-amber-400 text-black shadow-lg shadow-amber-400/20" : "bg-zinc-900 text-zinc-400 border border-zinc-800"
+            )}
+          >
+            <MessageSquare className="w-5 h-5" />
+            <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block">
+              {showChat ? 'Hide Chat' : 'Show Chat'}
+            </span>
+          </button>
         </div>
 
         <div className="flex gap-3">

@@ -18,6 +18,7 @@ interface AgencyTask {
   id: string;
   title: string;
   reward: number;
+  rewardType: 'coins' | 'usd';
   progress: number;
   deadline: string;
   status: 'available' | 'in-progress' | 'completed';
@@ -34,35 +35,102 @@ export default function AgentDashboard() {
   const [verificationStatus, setVerificationStatus] = React.useState<'none' | 'pending' | 'verified'>('none');
   const [inviteCode, setInviteCode] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<'team' | 'tasks' | 'stats' | 'earnings'>('team');
+  const [isLoading, setIsLoading] = React.useState(true);
   const [earningsSort, setEarningsSort] = React.useState<{ field: 'date' | 'amount', order: 'asc' | 'desc' }>({ field: 'date', order: 'desc' });
 
   const [hostProfile, setHostProfile] = React.useState({
-    displayName: 'Abebe_Protocol',
-    bio: 'Professional Ethiopian Host. Join the vibes!',
-    photoURL: 'https://i.pravatar.cc/300?u=Abebe',
+    displayName: 'User',
+    bio: '',
+    photoURL: '',
     category: 'Social'
   });
 
+  const [agencyInfo, setAgencyInfo] = React.useState({
+    id: '',
+    name: '',
+    description: '',
+    tier: 'Bronze Agency'
+  });
+
+  const [hosts, setHosts] = React.useState<Host[]>([]);
+  const [tasks, setTasks] = React.useState<AgencyTask[]>([]);
+
+  // Sync Profile and Agency info
   React.useEffect(() => {
-    const fetchProfile = async () => {
-      if (!auth.currentUser) return;
-      try {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setHostProfile({
-            displayName: data.displayName || auth.currentUser.displayName || '',
-            bio: data.bio || '',
-            photoURL: data.photoURL || auth.currentUser.photoURL || '',
-            category: data.category || 'Social'
-          });
+    if (!auth.currentUser) return;
+    
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    const unsubUser = onSnapshot(userRef, async (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setHostProfile({
+          displayName: data.displayName || auth.currentUser?.displayName || 'User',
+          bio: data.bio || '',
+          photoURL: data.photoURL || auth.currentUser?.photoURL || '',
+          category: data.category || 'Social'
+        });
+        setUserRole(data.role || 'none');
+        setVerificationStatus(data.isFaceVerified ? 'verified' : 'none');
+        
+        if (data.agencyId) {
+          const agencySnap = await getDoc(doc(db, 'agencies', data.agencyId));
+          if (agencySnap.exists()) {
+            setAgencyInfo({ id: agencySnap.id, ...agencySnap.data() } as any);
+          }
         }
-      } catch (error) {
-        handleFirestoreError(error, OperationType.GET, `users/${auth.currentUser.uid}`);
       }
-    };
-    fetchProfile();
+      setIsLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${auth.currentUser?.uid}`);
+      setIsLoading(false);
+    });
+
+    return () => unsubUser();
   }, []);
+
+  // Sync Tasks
+  React.useEffect(() => {
+    if (!auth.currentUser || userRole === 'none') return;
+
+    // Build query for tasks
+    // If agent, show all tasks for their agency
+    // If host, show tasks for their agency
+    const tasksRef = collection(db, 'tasks');
+    const unsubTasks = onSnapshot(tasksRef, (snap) => {
+      const allTasks = snap.docs.map(d => ({ id: d.id, ...d.data() } as AgencyTask));
+      // Filter by agency if needed, but for now we'll show tasks creator by this agent OR global tasks
+      setTasks(allTasks.filter(t => t.agencyId === agencyInfo.id || !t.agencyId));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'tasks');
+    });
+
+    return () => unsubTasks();
+  }, [userRole, agencyInfo.id]);
+
+  // Sync Team (for Agents)
+  React.useEffect(() => {
+    if (userRole !== 'agent' || !agencyInfo.id) return;
+
+    const usersRef = collection(db, 'users');
+    const unsubUsers = onSnapshot(usersRef, (snap) => {
+      const team = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(u => u.agencyId === agencyInfo.id && u.role === 'host')
+        .map(u => ({
+          id: u.id,
+          name: u.displayName || 'Unknown',
+          avatar: u.photoURL || `https://i.pravatar.cc/150?u=${u.id}`,
+          status: 'active' as const,
+          performance: u.performance || 0,
+          isVerified: u.isFaceVerified
+        }));
+      setHosts(team);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'users');
+    });
+
+    return () => unsubUsers();
+  }, [userRole, agencyInfo.id]);
 
   const saveProfile = async () => {
     if (!auth.currentUser) return;
@@ -79,49 +147,47 @@ export default function AgentDashboard() {
     }
   };
 
-  const [agencyInfo, setAgencyInfo] = React.useState({
-    name: 'Ethiopia Star',
-    description: 'The premier broadcasting agency in East Africa.',
-    tier: 'Gold Agency'
-  });
-
-  // Simulation Data
-  const [hosts, setHosts] = React.useState<Host[]>([
-    { id: '1', name: 'Zekarias', avatar: 'https://i.pravatar.cc/150?u=1', status: 'active', performance: 85 },
-    { id: '2', name: 'Hana_T', avatar: 'https://i.pravatar.cc/150?u=2', status: 'active', performance: 92 },
-    { id: '3', name: 'Desta_K', avatar: 'https://i.pravatar.cc/150?u=3', status: 'pending', performance: 0 },
-  ]);
-
-  const [tasks, setTasks] = React.useState<AgencyTask[]>([
-    { id: '1', title: '50 Hours Multi-Stream', reward: 5000, progress: 65, deadline: '2 days', status: 'in-progress', assignedTo: '1' },
-    { id: '2', title: 'Recruit 5 New Hosts', reward: 2000, progress: 40, deadline: '5 days', status: 'in-progress', assignedTo: '2' },
-  ]);
-
   const [newTask, setNewTask] = React.useState({
     title: '',
     reward: 1000,
+    rewardType: 'coins' as 'coins' | 'usd',
     deadline: '7 days',
     assignedTo: ''
   });
 
-  const handleCreateTask = () => {
-    if (!newTask.title) return;
-    const task: AgencyTask = {
-      id: Math.random().toString(36).substr(2, 9),
-      title: newTask.title,
-      reward: newTask.reward,
-      progress: 0,
-      deadline: newTask.deadline,
-      status: 'available',
-      assignedTo: newTask.assignedTo || undefined
-    };
-    setTasks([...tasks, task]);
-    setShowTaskModal(false);
-    setNewTask({ title: '', reward: 1000, deadline: '7 days', assignedTo: '' });
+  const handleCreateTask = async () => {
+    if (!newTask.title || !auth.currentUser) return;
+    try {
+      const taskData = {
+        title: newTask.title,
+        reward: newTask.reward,
+        rewardType: newTask.rewardType,
+        progress: 0,
+        deadline: newTask.deadline,
+        status: 'available',
+        assignedTo: newTask.assignedTo || null,
+        agencyId: agencyInfo.id,
+        creatorId: auth.currentUser.uid,
+        createdAt: serverTimestamp()
+      };
+      await addDoc(collection(db, 'tasks'), taskData);
+      setShowTaskModal(false);
+      setNewTask({ title: '', reward: 1000, rewardType: 'coins', deadline: '7 days', assignedTo: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'tasks');
+    }
   };
 
-  const startTask = (taskId: string) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'in-progress', progress: 5 } : t));
+  const startTask = async (taskId: string) => {
+    try {
+      await updateDoc(doc(db, 'tasks', taskId), {
+        status: 'in-progress',
+        progress: 5,
+        assignedTo: auth.currentUser?.uid
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `tasks/${taskId}`);
+    }
   };
 
   const [registrationStep, setRegistrationStep] = React.useState(1);
@@ -132,19 +198,61 @@ export default function AgentDashboard() {
     experience: 'None'
   });
 
-  const handleRegister = () => {
-    setAgencyInfo({ ...agencyInfo, name: regForm.name || 'New Agency' });
-    setUserRole('agent');
+  const handleRegister = async () => {
+    if (!auth.currentUser) return;
+    try {
+      const agencyData = {
+        name: regForm.name || 'New Agency',
+        description: `Professional agency by ${auth.currentUser.displayName}`,
+        ownerId: auth.currentUser.uid,
+        tier: 'Bronze Agency',
+        createdAt: serverTimestamp()
+      };
+      const agencyRef = await addDoc(collection(db, 'agencies'), agencyData);
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        role: 'agent',
+        agencyId: agencyRef.id
+      });
+      setUserRole('agent');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'agencies');
+    }
   };
 
-  const submitVerification = () => {
+  const submitVerification = async () => {
+    if (!auth.currentUser) return;
     setVerificationStatus('pending');
     setShowVerificationModal(false);
-    // Simulate auto-approval for demo after 5 seconds
-    setTimeout(() => {
-      setVerificationStatus('verified');
-    }, 5000);
+    
+    // In a real app, this would trigger face verification
+    // Since we have a real face verification in UserTasks, we can just point there
+    // But let's allow "Manual Verification Request" for Hosts here
+    try {
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        verificationRequest: {
+          status: 'pending',
+          requestedAt: serverTimestamp()
+        }
+      });
+      // Simulate auto-approval for demo
+      setTimeout(async () => {
+        await updateDoc(doc(db, 'users', auth.currentUser?.uid || ''), {
+          isFaceVerified: true,
+          role: 'host'
+        });
+      }, 5000);
+    } catch (error) {
+       handleFirestoreError(error, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-[50vh]">
+        <div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (userRole === 'none') {
     return (
@@ -480,7 +588,7 @@ export default function AgentDashboard() {
                     )}
                   </div>
                   <span className="text-amber-400 text-[10px] font-black uppercase bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20">
-                    {task.reward} COINS
+                    {task.rewardType === 'usd' ? '$' : ''}{task.reward.toLocaleString()} {task.rewardType === 'coins' ? 'COINS' : 'USD'}
                   </span>
                 </div>
                 <div className="space-y-2">
@@ -848,24 +956,74 @@ export default function AgentDashboard() {
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-xs font-bold focus:border-amber-400 outline-none transition-all"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-zinc-500 text-[10px] font-black uppercase ml-1">Reward</label>
-                      <input 
-                        type="number" 
-                        value={newTask.reward}
-                        onChange={(e) => setNewTask({...newTask, reward: parseInt(e.target.value)})}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-xs font-bold focus:border-amber-400 outline-none transition-all"
-                      />
+                  <div className="space-y-4 pt-2">
+                    <div className="flex items-center justify-between px-1">
+                      <label className="text-zinc-500 text-[10px] font-black uppercase">Task Reward</label>
+                      <div className="flex bg-zinc-900 rounded-lg p-0.5 border border-zinc-800">
+                        <button 
+                          onClick={() => setNewTask({...newTask, rewardType: 'coins'})}
+                          className={cn(
+                            "px-3 py-1 rounded-md text-[8px] font-black uppercase tracking-widest transition-all",
+                            newTask.rewardType === 'coins' ? "bg-amber-400 text-black" : "text-zinc-500 hover:text-white"
+                          )}
+                        >
+                          Coins
+                        </button>
+                        <button 
+                          onClick={() => setNewTask({...newTask, rewardType: 'usd'})}
+                          className={cn(
+                            "px-3 py-1 rounded-md text-[8px] font-black uppercase tracking-widest transition-all",
+                            newTask.rewardType === 'usd' ? "bg-amber-400 text-black" : "text-zinc-500 hover:text-white"
+                          )}
+                        >
+                          USD
+                        </button>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-zinc-500 text-[10px] font-black uppercase ml-1">Deadline</label>
-                      <input 
-                        type="text" 
-                        value={newTask.deadline}
-                        onChange={(e) => setNewTask({...newTask, deadline: e.target.value})}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-xs font-bold focus:border-amber-400 outline-none transition-all"
-                      />
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex-1">
+                        <input 
+                          type="number" 
+                          value={newTask.reward}
+                          onChange={(e) => setNewTask({...newTask, reward: parseInt(e.target.value) || 0})}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4 text-white text-xs font-bold focus:border-amber-400 outline-none transition-all pl-10"
+                        />
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-amber-400">
+                           {newTask.rewardType === 'usd' ? <span className="text-xs font-black">$</span> : <Sparkles className="w-4 h-4" />}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      {[500, 1000, 5000, 10000].map(amt => (
+                        <button
+                          key={amt}
+                          onClick={() => setNewTask({...newTask, reward: amt})}
+                          className={cn(
+                            "flex-1 py-2 rounded-lg border text-[9px] font-black uppercase tracking-tighter transition-all",
+                            newTask.reward === amt ? "bg-amber-400/10 border-amber-400/50 text-amber-400" : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700"
+                          )}
+                        >
+                          {newTask.rewardType === 'usd' ? '$' : ''}{amt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-zinc-500 text-[10px] font-black uppercase ml-1">Deadline</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['3 days', '7 days', '30 days'].map(d => (
+                        <button
+                          key={d}
+                          onClick={() => setNewTask({...newTask, deadline: d})}
+                          className={cn(
+                            "py-3 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all",
+                            newTask.deadline === d ? "bg-zinc-800 border-zinc-700 text-white" : "bg-zinc-950 border-zinc-900 text-zinc-600 hover:border-zinc-800"
+                          )}
+                        >
+                          {d}
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <div className="space-y-2">

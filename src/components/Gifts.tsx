@@ -33,6 +33,18 @@ export default function Gifts({ initialIsPurchasing = false, onSendGift, onClose
   const [loadingPkgId, setLoadingPkgId] = React.useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = React.useState<'host' | 'self' | null>(null);
 
+  const [userCoins, setUserCoins] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = onSnapshot(doc(db, 'users', auth.currentUser.uid), (snap) => {
+      if (snap.exists()) {
+        setUserCoins(snap.data().coins || 0);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   const handlePurchase = async (pkgId: string) => {
     setLoadingPkgId(pkgId);
     setLoading(true);
@@ -126,7 +138,7 @@ export default function Gifts({ initialIsPurchasing = false, onSendGift, onClose
               <div className="flex items-center gap-2">
                 <div className="bg-zinc-800 px-3 py-1.5 rounded-full flex items-center gap-2">
                   <Coins className="text-amber-400 w-3 h-3" />
-                  <span className="text-white font-black text-xs">12,450</span>
+                  <span className="text-white font-black text-xs">{userCoins.toLocaleString()}</span>
                 </div>
                 <button 
                   onClick={() => setIsPurchasing(true)}

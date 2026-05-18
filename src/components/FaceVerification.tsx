@@ -12,9 +12,11 @@ interface FaceVerificationProps {
 }
 
 export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVerificationProps) {
-  const [step, setStep] = React.useState<'initial' | 'scanning' | 'analyzing' | 'success' | 'refining'>('initial');
+  const [step, setStep] = React.useState<'initial' | 'scanning' | 'analyzing' | 'success' | 'failed'>('initial');
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
   const [progress, setProgress] = React.useState(0);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
 
   const startCamera = async () => {
@@ -25,8 +27,10 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
         videoRef.current.srcObject = stream;
       }
       setStep('scanning');
+      setErrorMsg(null);
     } catch (err) {
       console.error('Camera error:', err);
+      setErrorMsg("Camera access denied or unavailable.");
     }
   };
 
@@ -37,34 +41,52 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
     }
   };
 
-  const handleScan = () => {
-    setStep('analyzing');
-    let p = 0;
-    const interval = setInterval(() => {
-      p += 2;
-      setProgress(p);
-      if (p >= 100) {
-        clearInterval(interval);
-        setTimeout(() => setStep('refining'), 500);
-      }
-    }, 50);
-  };
-
-  const handleFinalize = async () => {
-    if (!auth.currentUser) return;
-    setStep('success');
+  const handleScan = async () => {
+    if (!videoRef.current || !canvasRef.current || !auth.currentUser) return;
     
-    try {
-      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-        isVerified: true,
-        identityVerifiedAt: new Date().toISOString()
-      });
-      setTimeout(() => {
-        onVerified();
-        onClose();
-      }, 2000);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
+    setStep('analyzing');
+    setProgress(10);
+
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = canvas.toDataURL('image/jpeg', 0.8);
+      
+      setProgress(30);
+
+      try {
+        const response = await fetch('/api/verify-face', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: imageData,
+            userId: auth.currentUser.uid
+          })
+        });
+
+        setProgress(70);
+        const result = await response.json();
+        setProgress(100);
+
+        if (result.success) {
+          setStep('success');
+          setTimeout(() => {
+            onVerified();
+            onClose();
+          }, 2500);
+        } else {
+          setStep('failed');
+          setErrorMsg(result.reason || "We couldn't verify your face. Please try again in a well-lit area.");
+        }
+      } catch (err) {
+        console.error('Verification error:', err);
+        setStep('failed');
+        setErrorMsg("Network error during verification. Please check your connection.");
+      }
     }
   };
 
@@ -73,6 +95,7 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
       stopCamera();
       setStep('initial');
       setProgress(0);
+      setErrorMsg(null);
     }
   }, [isOpen]);
 
@@ -131,7 +154,7 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                     </div>
                   )}
 
-                  {(step === 'scanning' || step === 'analyzing' || step === 'refining') && (
+                  {(step === 'scanning' || step === 'analyzing' || step === 'failed') && (
                     <>
                       <video 
                         ref={videoRef} 
@@ -140,9 +163,10 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                         muted 
                         className={cn(
                           "w-full h-full object-cover transition-all duration-1000",
-                          (step === 'analyzing' || step === 'refining') && "scale-110 blur-[2px] grayscale"
+                          (step === 'analyzing') && "scale-110 blur-[2px] grayscale"
                         )}
                       />
+                      <canvas ref={canvasRef} className="hidden" />
                       
                       {/* Scanning UI Overlays */}
                       <div className="absolute inset-0 pointer-events-none">
@@ -160,7 +184,7 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                           />
                         )}
 
-                        {(step === 'analyzing' || step === 'refining') && (
+                        {step === 'analyzing' && (
                           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[1px]">
                             <motion.div 
                               animate={{ rotate: 360 }}
@@ -168,7 +192,7 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                               className="w-16 h-16 border-2 border-amber-400 border-t-transparent rounded-full mb-6"
                             />
                             <p className="text-white font-black text-[10px] uppercase tracking-[0.3em] italic animate-pulse">
-                              {step === 'analyzing' ? 'Processing Points...' : 'Finalizing Hash...'}
+                              Analyzing Biometrics...
                             </p>
                             <div className="mt-8 w-48 h-1 bg-zinc-800 rounded-full overflow-hidden">
                               <motion.div 
@@ -177,6 +201,18 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                                 className="h-full bg-amber-400"
                               />
                             </div>
+                          </div>
+                        )}
+
+                        {step === 'failed' && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 bg-red-500/20 backdrop-blur-md">
+                            <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center mb-4">
+                              <AlertCircle className="w-6 h-6 text-white" />
+                            </div>
+                            <h4 className="text-white font-black text-[10px] uppercase tracking-widest mb-2">Verification Failed</h4>
+                            <p className="text-white/80 text-[10px] text-center font-medium leading-relaxed">
+                              {errorMsg}
+                            </p>
                           </div>
                         )}
                       </div>
@@ -201,26 +237,23 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                 </div>
 
                 <div className="space-y-4">
-                  {step === 'scanning' && (
+                  {(step === 'scanning' || step === 'failed') && (
                     <button 
                       onClick={handleScan}
-                      className="w-full bg-amber-400 text-black py-5 rounded-2xl font-black uppercase tracking-[0.3em] text-xs shadow-2xl shadow-amber-400/30 active:scale-95 transition-all"
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-black uppercase tracking-[0.3em] text-xs transition-all",
+                        step === 'failed' 
+                          ? "bg-red-500 text-white shadow-2xl shadow-red-500/30" 
+                          : "bg-amber-400 text-black shadow-2xl shadow-amber-400/30 active:scale-95"
+                      )}
                     >
-                      Process Identity
-                    </button>
-                  )}
-                  {step === 'refining' && (
-                    <button 
-                      onClick={handleFinalize}
-                      className="w-full bg-green-500 text-white py-5 rounded-2xl font-black uppercase tracking-[0.3em] text-xs shadow-2xl shadow-green-500/30 active:scale-95 transition-all"
-                    >
-                      Secure Profile
+                      {step === 'failed' ? 'Retry Identity Scan' : 'Process Identity'}
                     </button>
                   )}
                   <div className="flex items-start gap-3 bg-zinc-900/50 p-4 rounded-2xl border border-white/5">
                     <Sparkles className="w-4 h-4 text-amber-500 mt-1 flex-shrink-0" />
                     <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest leading-relaxed">
-                      Your biometric data is hashed locally and never stored on our servers. Verified badges increase your platform trust score by 85%.
+                      Please look directly into the camera in a brightly lit environment. Your biometric scan is verified by AI to ensure real human presence.
                     </p>
                   </div>
                 </div>

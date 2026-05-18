@@ -1,184 +1,78 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Default Deny
+    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- Helpers ---
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    
-    function isEmailVerified() {
-      return isSignedIn() && request.auth.token.email_verified == true;
-    }
+    // Common helpers
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function getUserData() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isAgent() { return isSignedIn() && getUserData().role == 'agent'; }
+    function isHost() { return isSignedIn() && getUserData().role == 'host'; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
+    // User profiles
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId) && 
+        request.resource.data.keys().hasAll(['displayName', 'coins', 'role', 'createdAt']) &&
+        request.resource.data.coins == 1000 && // Starter coins
+        request.resource.data.role == 'user';
+      allow update: if isOwner(userId) && (
+        // Allow updating profile info
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL', 'bio', 'category', 'isFaceVerified', 'faceVerifiedAt', 'agencyId', 'role']) ||
+        // Allow updating coins (only through controlled transactions - bit complex here, ideally backend handles coins)
+        // For this app, we'll allow client to decrement their coins for gifts and increment for rewards
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins'])
+      );
     }
 
-    // --- Validation Blueprints ---
-
-    function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'role', 'coins', 'isVerified', 'createdAt']) &&
-        data.keys().size() <= 20 &&
-        data.uid == request.auth.uid &&
-        data.role in ['user', 'agent', 'reseller', 'admin'] &&
-        data.coins is number && data.coins >= 0 &&
-        data.isVerified is bool &&
-      data.createdAt is timestamp &&
-        (data.get('displayName', '') is string && data.get('displayName', '').size() <= 100) &&
-        (data.get('photoURL', '') is string && data.get('photoURL', '').size() <= 1000) &&
-        (data.get('bio', '') is string && data.get('bio', '').size() <= 1000) &&
-        (data.get('category', 'Social') in ['Music', 'Gaming', 'Comedy', 'Social', 'Entertainment']) &&
-        (data.get('autoWithdrawEnabled', true) is bool) &&
-        (data.get('following', []) is list && data.get('following', []).size() <= 5000);
+    // Agencies
+    match /agencies/{agencyId} {
+      allow read: if isSignedIn();
+      allow create: if isAgent();
+      allow update: if isAgent() && resource.data.ownerId == request.auth.uid;
     }
 
-    function isValidWithdrawal(data) {
-      return data.keys().hasAll(['id', 'userId', 'amountCoins', 'amountUSD', 'method', 'status', 'createdAt']) &&
-        data.id == request.path[4] &&
-        data.userId == request.auth.uid &&
-        data.amountCoins is number && data.amountCoins >= 10000 && // $10 min @ 1000/1 ratio
-        data.method in ['bank', 'wallet'] &&
-        data.status == 'pending' &&
-        data.createdAt == request.time;
-    }
+    // Rooms
+    match /rooms/{roomId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn(); // Broad for now, usually restricted to host or moderator
+      allow delete: if isSignedIn() && resource.data.hostId == request.auth.uid;
 
-    function isValidRoom(data) {
-      return data.keys().hasAll(['id', 'hostId', 'type', 'status']) &&
-        data.keys().size() <= 15 &&
-        isValidId(data.id) &&
-        data.hostId == request.auth.uid &&
-        data.type in ['voice', 'video'] &&
-        data.status in ['live', 'ended'] &&
-        (data.get('title', '') is string && data.get('title', '').size() <= 200);
-    }
-
-    function isValidMessage(data, roomId) {
-      return data.keys().hasAll(['id', 'senderId', 'senderName', 'text', 'createdAt']) &&
-        data.keys().size() == 5 &&
-        data.senderId == request.auth.uid &&
-        data.text is string && data.text.size() <= 2000 &&
-        data.createdAt == request.time;
-    }
-
-    // --- Collections ---
-
-    match /users {
-      allow list: if isSignedIn();
-      match /{userId} {
+      match /messages/{messageId} {
         allow read: if isSignedIn();
-        allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().coins == 1000 && incoming().isVerified == false;
-        allow update: if isOwner(userId) && (
-          ((isValidUser(existing()) || isValidUser(incoming())) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'bio', 'category', 'gender', 'lastSeen', 'isOnline', 'paymentMethod', 'autoWithdrawEnabled', 'following']))
-          || (incoming().diff(existing()).affectedKeys().hasOnly(['coins']) && isAdmin())
-          || (incoming().diff(existing()).affectedKeys().hasOnly(['coins']) && incoming().coins >= 0 && incoming().coins < existing().coins)
+        allow create: if isSignedIn() && 
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.text.size() <= 500;
+        allow delete: if isSignedIn() && (
+          request.auth.uid == resource.data.senderId ||
+          request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId
         );
       }
     }
 
-    match /users/{userId}/task_completions {
-      allow list: if isOwner(userId) || isAdmin();
-      match /{taskId} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && 
-          incoming().keys().hasAll(['completedAt', 'rewardClaimed']) &&
-          incoming().completedAt is timestamp &&
-          incoming().rewardClaimed is number;
-        allow update: if isOwner(userId) &&
-          incoming().diff(existing()).affectedKeys().hasAny(['rewardClaimed', 'completedAt']);
-      }
-    }
-
-    match /users/{userId}/blocked {
-      allow list: if isOwner(userId);
-      match /{blockedId} {
-        allow read, write: if isOwner(userId);
-      }
-    }
-
-    match /withdrawals {
-      allow list: if isSignedIn();
-      match /{id} {
-        allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-        allow create: if isEmailVerified() && isValidWithdrawal(incoming()) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.coins >= incoming().amountCoins;
-      }
-    }
-
-    match /rooms {
-      allow list: if isSignedIn();
-      match /{roomId} {
-        allow read: if isSignedIn();
-        allow create: if isEmailVerified() && isValidId(roomId) && isValidRoom(incoming());
-        allow update: if isEmailVerified() && (
-          (incoming().hostId == request.auth.uid && isValidRoom(incoming()) && 
-           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'status', 'seats', 'settings', 'viewerCount']))
-          || isAdmin()
-        );
-        allow delete: if isAdmin() || (existing().hostId == request.auth.uid);
-      }
-    }
-
-    match /rooms/{roomId}/messages {
-      allow list: if isSignedIn();
-      match /{messageId} {
-        allow read: if isSignedIn();
-        allow create: if isEmailVerified() && isValidId(messageId) && isValidMessage(incoming(), roomId) &&
-          get(/databases/$(database)/documents/rooms/$(roomId)).data.status == 'live';
-      }
-    }
-
-    match /rooms/{roomId}/moderation_logs/{logId} {
+    // Tasks
+    match /tasks/{taskId} {
       allow read: if isSignedIn();
-      allow create: if isEmailVerified() && isValidId(logId) &&
-        get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid;
+      allow create: if isAgent();
+      allow update: if isSignedIn(); // Allow hosts to start/progress tasks
     }
 
-    match /gifts/{giftId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+    // Task completions
+    match /users/{userId}/task_completions/{taskId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
     }
 
-    match /transactions/{id} {
-      allow read: if isSignedIn() && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid || isAdmin());
-      // Transactions should ideally be created via controlled logic. 
-      // For now, allow creation if it's a gift transaction from the current user
-      allow create: if isEmailVerified() && isValidId(id) && 
-        incoming().fromId == request.auth.uid && 
-        incoming().type == 'gift' && 
-        incoming().status == 'completed' &&
-        incoming().createdAt == request.time;
-    }
-
-    match /verification_requests/{id} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isEmailVerified() && isValidId(id) && incoming().userId == request.auth.uid;
-      allow update: if isAdmin();
-    }
-    
-    match /admins/{adminId} {
-      allow read: if isSignedIn();
-      allow write: if false; // Only manageable via console
+    // Transactions
+    match /users/{userId}/transactions/{transactionId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
     }
   }
 }

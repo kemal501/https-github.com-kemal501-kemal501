@@ -2,208 +2,141 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile and wallet information",
+      "description": "User profile and balance information.",
       "type": "object",
       "properties": {
-        "uid": { "type": "string" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
         "email": { "type": "string" },
-        "role": { "type": "string", "enum": ["user", "agent", "reseller", "admin"] },
-        "coins": { "type": "number", "description": "Current wallet balance" },
-        "isOnline": { "type": "boolean" },
-        "lastSeen": { "type": "string", "format": "date-time" },
-        "gender": { "type": "string", "enum": ["male", "female", "other"] },
+        "coins": { "type": "number" },
+        "isVerified": { "type": "boolean" },
+        "isFaceVerified": { "type": "boolean" },
+        "faceVerifiedAt": { "type": "string", "format": "date-time" },
+        "agencyId": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "host", "agent"] },
         "bio": { "type": "string" },
-        "category": { "type": "string", "enum": ["Music", "Gaming", "Comedy", "Social", "Entertainment"] },
-        "isVerified": { "type": "boolean", "default": false },
-        "paymentMethod": { 
-          "type": "object",
-          "properties": {
-            "type": { "type": "string", "enum": ["bank", "wallet"] },
-            "accountNumber": { "type": "string" },
-            "bankName": { "type": "string" },
-            "walletAddress": { "type": "string" }
-          }
-        },
-        "autoWithdrawEnabled": { "type": "boolean", "default": true },
-        "following": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
-      },
-      "required": ["uid", "role", "coins"]
-    },
-    "Withdrawal": {
-      "title": "Withdrawal",
-      "description": "Financial withdrawal request",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "userId": { "type": "string" },
-        "amountCoins": { "type": "number" },
-        "amountUSD": { "type": "number" },
-        "method": { "type": "string", "enum": ["bank", "wallet"] },
-        "details": { "type": "object" },
-        "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed"] },
+        "category": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "userId", "amountCoins", "amountUSD", "method", "status", "createdAt"]
-    },
-    "Task": {
-      "title": "Task",
-      "description": "Daily task definition",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "title": { "type": "string" },
-        "reward": { "type": "number" },
-        "description": { "type": "string" }
-      },
-      "required": ["id", "title", "reward"]
-    },
-    "VerificationRequest": {
-      "title": "Verification Request",
-      "description": "Request for host verification",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "userId": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
-        "submittedAt": { "type": "string", "format": "date-time" },
-        "photoIdUrl": { "type": "string" },
-        "socialHandle": { "type": "string" },
-        "notes": { "type": "string" }
-      },
-      "required": ["id", "userId", "status", "submittedAt"]
+      "required": ["displayName", "coins", "role"]
     },
     "Room": {
       "title": "Room",
-      "description": "Live voice or video room",
+      "description": "Voice/Video chat room data and settings.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
         "title": { "type": "string" },
         "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
         "type": { "type": "string", "enum": ["voice", "video"] },
         "status": { "type": "string", "enum": ["live", "ended"] },
         "viewerCount": { "type": "number" },
-        "seats": { "type": "array", "description": "Array of 24 seat objects" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "settings": { "type": "object", "description": "24 custom settings toggle/options" }
-      },
-      "required": ["id", "hostId", "type", "status"]
-    },
-    "Gift": {
-      "title": "Gift",
-      "description": "Virtual gift definition",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "price": { "type": "number" },
-        "icon": { "type": "string" }
-      },
-      "required": ["id", "name", "price", "icon"]
-    },
-    "Transaction": {
-      "title": "Transaction",
-      "description": "Coin transaction log",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "fromId": { "type": "string" },
-        "toId": { "type": "string" },
-        "amount": { "type": "number" },
-        "type": { "type": "string", "enum": ["gift", "purchase", "transfer", "withdrawal", "admin_generation", "entry_fee"] },
-        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "seats": { "type": "array" },
+        "settings": { "type": "object" },
+        "bannedUsers": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "amount", "type", "status", "createdAt"]
+      "required": ["title", "hostId", "hostName", "type", "status"]
     },
-    "ModerationAction": {
-      "title": "Moderation Action",
-      "description": "Log of a moderation event in a room",
+    "Message": {
+      "title": "Message",
+      "description": "Chat messages within a room.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "type": { "type": "string", "enum": ["mute", "kick", "ban", "unmute", "unban"] },
-        "roomId": { "type": "string" },
-        "moderatorId": { "type": "string" },
-        "targetId": { "type": "string" },
-        "reason": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["id", "type", "roomId", "moderatorId", "targetId", "createdAt"]
-    },
-    "ChatMessage": {
-      "title": "Chat Message",
-      "description": "Real-time chat message in a room",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
         "senderId": { "type": "string" },
         "senderName": { "type": "string" },
         "text": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "senderId", "senderName", "text", "createdAt"]
+      "required": ["senderId", "senderName", "text", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Agency or system tasks for hosts.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "reward": { "type": "number" },
+        "rewardType": { "type": "string", "enum": ["coins", "usd"] },
+        "deadline": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["available", "in-progress", "completed"] },
+        "assignedTo": { "type": "string" },
+        "agencyId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "progress": { "type": "number" },
+        "target": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "reward", "rewardType", "status", "creatorId"]
+    },
+    "TaskCompletion": {
+      "title": "Task Completion",
+      "description": "Records of users completing tasks.",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "userId": { "type": "string" },
+        "rewardClaimed": { "type": "number" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["taskId", "userId", "rewardClaimed", "completedAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Coin transactions (gifts, rewards).",
+      "type": "object",
+      "properties": {
+        "fromId": { "type": "string" },
+        "toId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["gift", "reward", "purchase"] },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["amount", "type", "status", "createdAt"]
+    },
+    "Agency": {
+      "title": "Agency",
+      "description": "Broadcasting agency information.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "tier": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "createdAt"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
+    "users/{userId}": {
       "schema": "User",
-      "description": "User profiles"
+      "description": "User profile data."
     },
-    "/users/{userId}/blocked/{blockedId}": {
-      "schema": {
-        "title": "Blocked User",
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "blockedAt": { "type": "string", "format": "date-time" }
-        }
-      },
-      "description": "List of users blocked by the parent user"
+    "users/{userId}/task_completions/{taskId}": {
+      "schema": "TaskCompletion",
+      "description": "Users task completion records."
     },
-    "/rooms/{roomId}": {
-      "schema": "Room",
-      "description": "Active and past rooms"
-    },
-    "/rooms/{roomId}/messages/{messageId}": {
-      "schema": "ChatMessage",
-      "description": "Real-time messages in a specific room"
-    },
-    "/rooms/{roomId}/moderation_logs/{logId}": {
-      "schema": "ModerationAction",
-      "description": "Moderation logs for a specific room"
-    },
-    "/gifts/{giftId}": {
-      "schema": "Gift",
-      "description": "Available gifts"
-    },
-    "/transactions/{id}": {
+    "users/{userId}/transactions/{transactionId}": {
       "schema": "Transaction",
-      "description": "Global transaction log"
+      "description": "Users transaction history."
     },
-    "/withdrawals/{id}": {
-      "schema": "Withdrawal",
-      "description": "User withdrawal requests"
+    "rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Live room data."
     },
-    "/users/{userId}/task_completions/{taskId}": {
-      "schema": {
-        "title": "Task Completion",
-        "type": "object",
-        "properties": {
-          "completedAt": { "type": "string", "format": "date-time" },
-          "rewardClaimed": { "type": "number" }
-        }
-      },
-      "description": "Log of completed daily tasks per user"
+    "rooms/{roomId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Room chat messages."
     },
-    "/verification_requests/{id}": {
-      "schema": "VerificationRequest",
-      "description": "Host verification requests"
+    "tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Global or agency-specific tasks."
+    },
+    "agencies/{agencyId}": {
+      "schema": "Agency",
+      "description": "Agency details."
     }
   }
 }
