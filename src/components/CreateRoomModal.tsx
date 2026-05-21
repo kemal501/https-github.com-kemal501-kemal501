@@ -306,9 +306,43 @@ export default function CreateRoomModal({ isOpen, onClose, onRoomCreated }: Crea
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-center gap-2 pt-2">
-                    <ShieldCheck className="w-3 h-3 text-zinc-600" />
-                    <p className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">Barca-live Protection v2.4 Enabled</p>
+                  {/* Barca-live Protection v2.4 Trust Indicators Box */}
+                  <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-[1.75rem] p-4 space-y-2.5 text-left shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-500/5">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        </div>
+                        <span className="text-[9px] font-black uppercase text-white tracking-widest">
+                          BARCA-LIVE PROTECTION v2.4
+                        </span>
+                      </div>
+                      <span className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse-slow" />
+                        SECURED ACTION
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-900 text-left">
+                      <div className="flex items-start gap-1.5 min-w-0 text-left">
+                        <span className="w-1 h-1 bg-amber-400 rounded-full mt-1.5 flex-shrink-0" />
+                        <div className="min-w-0 flex flex-col items-start text-left">
+                          <p className="text-[8px] font-black text-zinc-300 uppercase tracking-wider leading-none">AI Identity Shield</p>
+                          <p className="text-[7px] text-zinc-500 font-bold uppercase tracking-wide leading-tight mt-0.5 text-left">
+                            Verified host status
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-1.5 min-w-0 text-left">
+                        <span className="w-1 h-1 bg-amber-400 rounded-full mt-1.5 flex-shrink-0" />
+                        <div className="min-w-0 flex flex-col items-start text-left">
+                          <p className="text-[8px] font-black text-zinc-300 uppercase tracking-wider leading-none">Encrypted Nodes</p>
+                          <p className="text-[7px] text-zinc-500 font-bold uppercase tracking-wide leading-tight mt-0.5 text-left">
+                            Secured peer matrix
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </form>
               </div>

@@ -21,13 +21,24 @@ service cloud.firestore {
         request.resource.data.keys().hasAll(['displayName', 'coins', 'role', 'createdAt']) &&
         request.resource.data.coins == 1000 && // Starter coins
         request.resource.data.role == 'user';
-      allow update: if isOwner(userId) && (
-        // Allow updating profile info
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL', 'bio', 'category', 'isFaceVerified', 'faceVerifiedAt', 'agencyId', 'role']) ||
-        // Allow updating coins (only through controlled transactions - bit complex here, ideally backend handles coins)
-        // For this app, we'll allow client to decrement their coins for gifts and increment for rewards
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins'])
+      allow update: if (isOwner(userId) && (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'photoURL', 'bio', 'category', 'isFaceVerified', 
+          'faceVerifiedAt', 'agencyId', 'role', 'following', 'coins', 
+          'paymentMethod', 'verificationRequest'
+        ])
+      )) || (
+        // Allow others to only increment the user's coins (for gifting)
+        isSignedIn() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins']) &&
+        request.resource.data.coins > resource.data.coins
       );
+    }
+
+    // Following lists
+    match /users/{userId}/following/{followingId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
     }
 
     // Agencies
@@ -47,13 +58,19 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if isSignedIn();
         allow create: if isSignedIn() && 
-          request.resource.data.senderId == request.auth.uid &&
+          (request.resource.data.senderId == request.auth.uid || request.resource.data.senderId == 'system') &&
           request.resource.data.text.size() <= 500;
         allow delete: if isSignedIn() && (
           request.auth.uid == resource.data.senderId ||
           request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId
         );
       }
+    }
+
+    // Withdrawals
+    match /withdrawals/{withdrawalId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
     // Tasks
@@ -72,7 +89,29 @@ service cloud.firestore {
     // Transactions
     match /users/{userId}/transactions/{transactionId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId);
+      allow create: if isOwner(userId) || (isSignedIn() && request.resource.data.toId == userId && request.resource.data.type == 'gift');
+    }
+
+    // Blocked users
+    match /users/{userId}/blocked/{blockedId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+
+    // Sitting rewards
+    match /users/{userId}/sitting_rewards/{sittingId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Saved recordings in Cloud Storage indexed via Firestore
+    match /users/{userId}/recordings/{recordingId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Global Music Broadcast Synchronization
+    match /global_music/{musicId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(musicId);
     }
   }
 }

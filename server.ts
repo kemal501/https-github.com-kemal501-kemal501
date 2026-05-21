@@ -176,28 +176,155 @@ app.post("/api/room/heartbeat", async (req, res) => {
 app.post("/api/admin/generate-coins", async (req, res) => {
   const { userId, amount, reason, adminSecret } = req.body;
   // Simple check for now, in production use proper auth/roles
-  if (adminSecret !== "TEMPORARY_SECRET") {
+  if (adminSecret !== "TEMPORARY_SECRET" && adminSecret !== process.env.ADMIN_SECRET) {
     return res.status(403).json({ error: "Unauthorized" });
   }
   
   try {
     const userRef = adminDb.doc(`users/${userId}`);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "Target user not found" });
+    }
+
     await userRef.update({
       coins: FieldValue.increment(amount)
     });
     
-    // Log the action
-    await adminDb.collection("admin_logs").add({
-      adminId: "SYSTEM",
+    // Log the action to unified coin transactions
+    const txLog = {
+      type: "admin_mint",
       targetUserId: userId,
-      action: "GENERATE_COINS",
+      targetUserName: userSnap.data()?.displayName || "Platform User",
       amount,
-      reason: reason || "No reason provided",
-      createdAt: FieldValue.serverTimestamp()
-    });
+      reason: reason || "Admin Generation",
+      createdAt: new Date().toISOString()
+    };
+
+    await adminDb.collection("coin_transactions").add(txLog);
     
-    res.json({ success: true });
+    res.json({ success: true, message: `${amount} coins generated successfully.` });
   } catch (error) { res.status(500).json({ error: "Mint error" }); }
+});
+
+// Admin: Retrieve platform users list
+app.get("/api/admin/users", async (req, res) => {
+  try {
+    const usersSnap = await adminDb.collection("users").limit(150).get();
+    const users = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json({ success: true, users });
+  } catch (error) {
+    res.status(500).json({ error: "Could not fetch platform users" });
+  }
+});
+
+// Admin: Update user's role on the platform
+app.post("/api/admin/update-role", async (req, res) => {
+  const { userId, role } = req.body;
+  if (!userId || !role) {
+    return res.status(400).json({ error: "Missing parameters" });
+  }
+  try {
+    await adminDb.doc(`users/${userId}`).update({ role });
+    res.json({ success: true, message: `User role updated successfully to ${role}` });
+  } catch (error) {
+    res.status(500).json({ error: "Could not update user role" });
+  }
+});
+
+// Seller: Purchase coin package wholesale from platform
+app.post("/api/seller/purchase-coins", async (req, res) => {
+  const { sellerId, amount, costETB } = req.body;
+  if (!sellerId || !amount) {
+    return res.status(400).json({ error: "Missing parameters" });
+  }
+  try {
+    const sellerRef = adminDb.doc(`users/${sellerId}`);
+    const sellerSnap = await sellerRef.get();
+    if (!sellerSnap.exists) {
+      return res.status(404).json({ error: "Seller profile not found" });
+    }
+
+    await sellerRef.update({
+      coins: FieldValue.increment(amount)
+    });
+
+    // Create a transaction log
+    await adminDb.collection("coin_transactions").add({
+      type: "wholesale_purchase",
+      sellerId,
+      sellerName: sellerSnap.data()?.displayName || "Coin Seller",
+      amount,
+      costETB,
+      createdAt: new Date().toISOString()
+    });
+
+    res.json({ success: true, message: `Successfully purchased ${amount} coins wholesale` });
+  } catch (error) {
+    res.status(500).json({ error: "Wholesale purchase failed" });
+  }
+});
+
+// Seller: Resell coins to another platform user
+app.post("/api/seller/resell-coins", async (req, res) => {
+  const { sellerId, targetUserId, amount, priceETB } = req.body;
+  if (!sellerId || !targetUserId || !amount || amount <= 0) {
+    return res.status(400).json({ error: "Missing required resell details" });
+  }
+
+  try {
+    const sellerRef = adminDb.doc(`users/${sellerId}`);
+    const sellerSnap = await sellerRef.get();
+    if (!sellerSnap.exists) {
+      return res.status(404).json({ error: "Seller profile not found" });
+    }
+
+    const sellerCoins = sellerSnap.data()?.coins || 0;
+    if (sellerCoins < amount) {
+      return res.status(400).json({ error: "Insufficient coin balance for resell" });
+    }
+
+    const targetRef = adminDb.doc(`users/${targetUserId}`);
+    const targetSnap = await targetRef.get();
+    if (!targetSnap.exists) {
+      return res.status(404).json({ error: "Target platform user not found" });
+    }
+
+    // Atomic transaction updates
+    const batch = adminDb.batch();
+    batch.update(sellerRef, { coins: FieldValue.increment(-amount) });
+    batch.update(targetRef, { coins: FieldValue.increment(amount) });
+
+    // Track transaction
+    const txRef = adminDb.collection("coin_transactions").doc();
+    batch.set(txRef, {
+      type: "seller_resell",
+      sellerId,
+      sellerName: sellerSnap.data()?.displayName || "Coin Seller",
+      targetUserId,
+      targetUserName: targetSnap.data()?.displayName || "Platform User",
+      amount,
+      priceETB: priceETB || 0,
+      createdAt: new Date().toISOString()
+    });
+
+    await batch.commit();
+    res.json({ success: true, message: `Successfully resold ${amount} coins to ${targetSnap.data()?.displayName}` });
+  } catch (error) {
+    console.error("Resell database operation error:", error);
+    res.status(500).json({ error: "Resell transaction failed internally" });
+  }
+});
+
+// Coin Transactions log retriever
+app.get("/api/coin/transactions", async (req, res) => {
+  try {
+    const snap = await adminDb.collection("coin_transactions").orderBy("createdAt", "desc").limit(40).get();
+    const transactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json({ success: true, transactions });
+  } catch (error) {
+    res.status(500).json({ error: "Could not fetch coins logs" });
+  }
 });
 
 // Game Logic: Dice
@@ -341,7 +468,7 @@ app.post("/api/verify-face", async (req, res) => {
     `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3.5-flash",
       contents: {
         parts: [
           { inlineData: { data: base64Data, mimeType: "image/jpeg" } },
@@ -362,7 +489,8 @@ app.post("/api/verify-face", async (req, res) => {
       }
     });
 
-    const result = JSON.parse(response.text || "{}");
+    const textContent = response.text?.trim() || "{}";
+    const result = JSON.parse(textContent);
 
     if (result.isRealPerson && result.confidence > 0.8) {
       await adminDb.doc(`users/${userId}`).update({
@@ -378,26 +506,6 @@ app.post("/api/verify-face", async (req, res) => {
   } catch (error) {
     console.error("Face verification error:", error);
     res.status(500).json({ error: "Verification failed internally" });
-  }
-});
-
-// Admin Route: Coin Generation
-// ... (keep the same)
-app.post("/api/admin/generate-coins", async (req, res) => {
-  const { userId, amount, adminSecret } = req.body;
-  
-  if (adminSecret !== process.env.ADMIN_SECRET) {
-    return res.status(403).json({ error: "Unauthorized" });
-  }
-
-  try {
-    await adminDb.doc(`users/${userId}`).update({
-      coins: FieldValue.increment(amount)
-    });
-    console.log(`Generating ${amount} coins for user ${userId}`);
-    res.json({ success: true, message: `${amount} coins generated successfully.` });
-  } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 

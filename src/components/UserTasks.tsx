@@ -1,9 +1,10 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, ShieldCheck, Timer, Coins, Camera, ArrowRight, UserPlus, Star, Info, Zap, Loader2, History, TrendingUp, ArrowUpRight } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, Timer, Coins, Camera, ArrowRight, UserPlus, Star, Info, Zap, Loader2, History, TrendingUp, ArrowUpRight, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { doc, updateDoc, setDoc, serverTimestamp, increment, getDoc, collection, addDoc, onSnapshot } from 'firebase/firestore';
+import FaceVerification from './FaceVerification';
 
 interface Task {
   id: string;
@@ -19,6 +20,7 @@ interface Task {
 export default function UserTasks() {
   const [isFaceVerified, setIsFaceVerified] = React.useState(false);
   const [isVerifying, setIsVerifying] = React.useState(false);
+  const [isFaceModalOpen, setIsFaceModalOpen] = React.useState(false);
   const [claimingId, setClaimingId] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<'all' | 'available' | 'in-progress' | 'completed' | 'locked'>('all');
   const [earningsSort, setEarningsSort] = React.useState<{ field: 'date' | 'amount', order: 'asc' | 'desc' }>({ field: 'date', order: 'desc' });
@@ -27,6 +29,81 @@ export default function UserTasks() {
 
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [userCoins, setUserCoins] = React.useState(0);
+
+  const [sitRewardState, setSitRewardState] = React.useState({
+    durationSeconds: 0,
+    claimedHalf: false,
+    claimedFull: false
+  });
+  const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
+
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const sitRef = doc(db, 'users', auth.currentUser.uid, 'sitting_rewards', todayStr);
+    const unsub = onSnapshot(sitRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setSitRewardState({
+          durationSeconds: data.durationSeconds || 0,
+          claimedHalf: data.claimedHalf || false,
+          claimedFull: data.claimedFull || false
+        });
+      } else {
+        setSitRewardState({
+          durationSeconds: 0,
+          claimedHalf: false,
+          claimedFull: false
+        });
+      }
+    });
+    return () => unsub();
+  }, [todayStr]);
+
+  const claimTasksSittingReward = async (isHalf: boolean) => {
+    if (!auth.currentUser) return;
+    const userId = auth.currentUser.uid;
+    const typeStr = isHalf ? 'half' : 'full';
+    
+    setClaimingId(`sit-${typeStr}`);
+    
+    try {
+      const sitRef = doc(db, 'users', userId, 'sitting_rewards', todayStr);
+      
+      const snap = await getDoc(sitRef);
+      const data = snap.data() || {};
+      if (isHalf && data.claimedHalf) return;
+      if (!isHalf && data.claimedFull) return;
+
+      const rewardCoins = isNewUser
+        ? 10000000
+        : 5000000;
+
+      await setDoc(sitRef, {
+        [isHalf ? 'claimedHalf' : 'claimedFull']: true,
+        durationSeconds: sitRewardState.durationSeconds,
+        lastUpdated: serverTimestamp()
+      }, { merge: true });
+
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        coins: increment(rewardCoins)
+      });
+
+      await addDoc(collection(db, 'users', userId, 'transactions'), {
+        type: 'reward',
+        amount: rewardCoins,
+        description: `Claimed Sit & Earn (${isHalf ? '1 Hour' : '2 Hours'} milestone) as ${isNewUser ? 'New User' : 'Established User'}`,
+        createdAt: serverTimestamp(),
+        status: 'completed'
+      });
+
+      alert(`Success! Deposited +${rewardCoins.toLocaleString()} Coins directly into your balance.`);
+    } catch (err) {
+      console.error("Error claiming reward", err);
+    } finally {
+      setClaimingId(null);
+    }
+  };
 
   React.useEffect(() => {
     if (!auth.currentUser) return;
@@ -154,103 +231,44 @@ export default function UserTasks() {
     }
   };
 
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  const [stream, setStream] = React.useState<MediaStream | null>(null);
-
-  const startCamera = async () => {
+  const handleFaceVerified = async () => {
+    setIsFaceVerified(true);
+    if (!auth.currentUser) return;
+    const userId = auth.currentUser.uid;
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'user' },
-        audio: false 
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-    } catch (err) {
-      console.error("Camera access denied:", err);
-      setIsVerifying(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-  };
-
-  const [verificationStep, setVerificationStep] = React.useState<string>('Align face in frame');
-
-  const [capturedImage, setCapturedImage] = React.useState<string | null>(null);
-
-  const captureSnapshot = () => {
-    if (videoRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(-1, 1);
-        ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
-        setCapturedImage(canvas.toDataURL('image/jpeg'));
-      }
-    }
-  };
-
-  const handleVerify = async () => {
-    setIsVerifying(true);
-    setVerificationStep('Initializing Camera...');
-    await startCamera();
-    
-    const steps = [
-      { label: 'Align face in frame', delay: 1500 },
-      { label: 'Blink your eyes', delay: 2000 },
-      { label: 'Hold still... Capturing', delay: 1500, action: captureSnapshot },
-      { label: 'Processing biometrics...', delay: 2000 },
-      { label: 'Checking authenticity...', delay: 1500 },
-      { label: 'Verifying with database...', delay: 1500 },
-      { label: 'Identity Confirmed!', delay: 1000 }
-    ];
-
-    let current = 0;
-    const processStep = async (index: number) => {
-      if (index >= steps.length) {
-        stopCamera();
+      const completionRef = doc(db, 'users', userId, 'task_completions', 'verification');
+      const snap = await getDoc(completionRef);
+      if (!snap.exists()) {
+        const rewardAmt = 5000; // Standard premium identity verification bonus
         
-        // Persist verification to Firestore
-        if (auth.currentUser) {
-          try {
-            await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-              isFaceVerified: true,
-              faceVerifiedAt: serverTimestamp()
-            });
-          } catch (error) {
-            console.error("Failed to persist verification:", error);
-          }
-        }
+        await setDoc(completionRef, {
+          completedAt: serverTimestamp(),
+          rewardClaimed: rewardAmt
+        });
+        
+        await updateDoc(doc(db, 'users', userId), {
+          coins: increment(rewardAmt),
+          isFaceVerified: true,
+          faceVerifiedAt: serverTimestamp()
+        });
 
-        setIsFaceVerified(true);
-        setIsVerifying(false);
-        setCapturedImage(null);
-
-        setTasks(prev => prev.map(t => {
-          if (t.id === 'verification') return { ...t, progress: 1, status: 'completed' };
-          if (t.id === 'engagement') return { ...t, status: 'available' };
-          return t;
-        }));
-        return;
+        await addDoc(collection(db, 'users', userId, 'transactions'), {
+          type: 'reward',
+          amount: rewardAmt,
+          description: `Completed: Identity Verification`,
+          createdAt: serverTimestamp(),
+          status: 'completed'
+        });
       }
 
-      setVerificationStep(steps[index].label);
-      if (steps[index].action) steps[index].action();
-
-      setTimeout(() => {
-        processStep(index + 1);
-      }, steps[index].delay);
-    };
-
-    processStep(0);
+      setTasks(prev => prev.map(t => {
+        if (t.id === 'verification') return { ...t, progress: 1, status: 'completed' };
+        if (t.id === 'engagement') return { ...t, status: 'available' };
+        return t;
+      }));
+    } catch (err) {
+      console.error("Error setting verification task completion:", err);
+    }
   };
 
   // Remove auto-claim logic
@@ -304,6 +322,180 @@ export default function UserTasks() {
       {/* Task List */}
       <div className="space-y-4">
         <AnimatePresence mode="popLayout">
+          {/* Identity Verification Status Card */}
+          {(filter === 'all' || filter === 'available' || filter === 'completed') && (
+            !isFaceVerified ? (
+              <motion.div 
+                layout
+                key="verification-banner-unverified"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="p-6 rounded-[2.5rem] border bg-gradient-to-br from-amber-950/10 via-zinc-900 to-zinc-900 border-amber-500/20 shadow-xl shadow-amber-950/5 text-left flex flex-col md:flex-row md:items-center justify-between gap-4"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                    <h3 className="text-white font-black italic uppercase text-sm tracking-tight flex items-center gap-2">
+                      Identity Verification Protocol
+                    </h3>
+                  </div>
+                  <p className="text-zinc-500 text-[10px] font-medium leading-relaxed max-w-[420px]">
+                    Unlock exclusive Host channels, stream audio directly inside private seats, and qualify for high-tier agency assignments through our dual biometric verification standard.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsFaceModalOpen(true)}
+                  className="bg-amber-400 hover:bg-amber-300 text-black font-black uppercase text-[10px] tracking-widest px-6 py-4 rounded-2xl shadow-lg shadow-amber-400/10 active:scale-95 transition-all self-start md:self-center flex items-center gap-2"
+                >
+                  <Camera className="w-4 h-4" />
+                  Verify Identity
+                </button>
+              </motion.div>
+            ) : (
+              <motion.div 
+                layout
+                key="verification-banner-verified"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="p-6 rounded-[2.5rem] border bg-gradient-to-br from-green-950/10 via-zinc-900 to-zinc-900 border-green-500/20 shadow-xl shadow-green-950/5 text-left flex flex-col md:flex-row md:items-center justify-between gap-4"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-green-400" />
+                    <h3 className="text-white font-black italic uppercase text-sm tracking-tight flex items-center gap-2">
+                      Identity Verified Securely
+                    </h3>
+                  </div>
+                  <p className="text-zinc-500 text-[10px] font-medium leading-relaxed max-w-[420px]">
+                    Your biometric profile has been verified successfully. Your status is secured for all host modules, and task progression is fully active.
+                  </p>
+                </div>
+                <div className="bg-green-500/10 border border-green-500/20 px-4 py-2.5 rounded-xl flex items-center gap-1.5 self-start md:self-center">
+                  <span className="h-1.5 w-1.5 bg-green-400 rounded-full animate-ping" />
+                  <span className="text-green-400 text-[8px] font-bold uppercase tracking-widest">Active Verified Protocol</span>
+                </div>
+              </motion.div>
+            )
+          )}
+
+          {/* Custom Sit & Earn Card */}
+          {(filter === 'all' || filter === 'in-progress' || (filter === 'available' && (!sitRewardState.claimedHalf || !sitRewardState.claimedFull))) && (
+            <motion.div 
+              layout
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="p-6 rounded-[2.5rem] border bg-gradient-to-br from-purple-950/10 via-zinc-900 to-zinc-900 border-purple-900/30 shadow-xl shadow-purple-950/10 text-left"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-white font-black italic uppercase text-sm tracking-tight flex items-center gap-1.5">
+                      Barca Sit & Join Quest
+                      <Sparkles className="w-4 h-4 text-purple-400 animate-pulse" />
+                    </h3>
+                    <span className={cn(
+                      "text-[8px] font-black px-2 py-0.5 rounded-full border",
+                      isNewUser ? "text-amber-400 border-amber-400/20" : "text-blue-400 border-blue-400/20"
+                    )}>
+                      {isNewUser ? 'NEW USER BONUS' : 'ESTABLISHED USER'}
+                    </span>
+                  </div>
+                  <p className="text-zinc-500 text-[10px] font-medium leading-relaxed max-w-[280px]">
+                    Sit down on any seat inside any room. Earn massive coins for active sitting. Claim half with 1 hour and continue for next reward up to 2 hours!
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-1 text-amber-400">
+                    <Coins className="w-4 h-4" />
+                    <span className="text-sm font-black italic">+{isNewUser ? "20,000k" : "10,000k"}</span>
+                  </div>
+                  <span className="text-zinc-600 text-[8px] font-black uppercase tracking-widest">COINS</span>
+                </div>
+              </div>
+
+              {/* Progress & Time */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[9px] font-black uppercase text-zinc-500 tracking-widest">
+                    <span>Active Sitting Time</span>
+                    <span className="font-mono text-zinc-300">
+                      {Math.floor(sitRewardState.durationSeconds / 3600).toString().padStart(2, '0')}h{' '}
+                      {Math.floor((sitRewardState.durationSeconds % 3600) / 60).toString().padStart(2, '0')}m / 2h
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden">
+                    <motion.div 
+                      className="h-full bg-gradient-to-r from-purple-500 to-indigo-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.min(100, (sitRewardState.durationSeconds / 7200) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Sub Milestone Claims */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div className="p-4 bg-black/30 border border-zinc-900 rounded-2xl flex flex-col justify-between">
+                    <div>
+                      <span className="text-[8px] font-black text-purple-400 uppercase tracking-widest">1 Hour (Half)</span>
+                      <p className="text-[10px] font-medium text-zinc-400 mt-1 uppercase">+{isNewUser ? "10,000,000" : "5,000,000"} Coins</p>
+                    </div>
+                    <div className="mt-3">
+                      {sitRewardState.claimedHalf ? (
+                        <div className="bg-green-500/10 border border-green-500/20 text-green-400 py-1.5 rounded-xl text-[8px] font-black uppercase text-center">
+                          Claimed ✓
+                        </div>
+                      ) : sitRewardState.durationSeconds >= 3600 ? (
+                        <button
+                          type="button"
+                          onClick={() => claimTasksSittingReward(true)}
+                          disabled={claimingId !== null}
+                          className="w-full bg-amber-400 text-black py-1.5 rounded-xl text-[8px] font-black uppercase text-center hover:bg-amber-300 transition-colors"
+                        >
+                          {claimingId === 'sit-half' ? 'Claiming...' : 'Claim'}
+                        </button>
+                      ) : (
+                        <div className="bg-zinc-900 border border-zinc-800 text-zinc-600 py-1.5 rounded-xl text-[8px] font-bold uppercase text-center">
+                          Locked ({Math.floor(sitRewardState.durationSeconds / 60)}/60m)
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-black/30 border border-zinc-900 rounded-2xl flex flex-col justify-between">
+                    <div>
+                      <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">2 Hour (Full)</span>
+                      <p className="text-[10px] font-medium text-zinc-400 mt-1 uppercase">+{isNewUser ? "10,000,000" : "5,000,000"} Coins</p>
+                    </div>
+                    <div className="mt-3">
+                      {sitRewardState.claimedFull ? (
+                        <div className="bg-green-500/10 border border-green-500/20 text-green-400 py-1.5 rounded-xl text-[8px] font-black uppercase text-center">
+                          Claimed ✓
+                        </div>
+                      ) : sitRewardState.durationSeconds >= 7200 ? (
+                        <button
+                          type="button"
+                          onClick={() => claimTasksSittingReward(false)}
+                          disabled={claimingId !== null}
+                          className="w-full bg-amber-400 text-black py-1.5 rounded-xl text-[8px] font-black uppercase text-center hover:bg-amber-300 transition-colors"
+                        >
+                          {claimingId === 'sit-full' ? 'Claiming...' : 'Claim'}
+                        </button>
+                      ) : (
+                        <div className="bg-zinc-900 border border-zinc-800 text-zinc-600 py-1.5 rounded-xl text-[8px] font-bold uppercase text-center">
+                          Locked ({Math.floor(sitRewardState.durationSeconds / 60)}/120m)
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {tasks.filter(t => filter === 'all' || t.status === filter).map(task => (
             <motion.div 
               key={task.id}
@@ -361,55 +553,14 @@ export default function UserTasks() {
 
               {task.id === 'verification' && task.status === 'available' && task.progress < task.target && (
                 <div className="space-y-4">
-                  {isVerifying ? (
-                    <div className="relative aspect-square w-full max-w-[240px] mx-auto rounded-[2rem] overflow-hidden border-4 border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.3)] bg-black">
-                      {capturedImage ? (
-                        <motion.img 
-                          initial={{ opacity: 0, scale: 1.1 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          src={capturedImage} 
-                          className="w-full h-full object-cover grayscale brightness-125"
-                        />
-                      ) : (
-                        <video 
-                          ref={videoRef}
-                          autoPlay 
-                          playsInline 
-                          muted 
-                          className="w-full h-full object-cover scale-x-[-1]"
-                        />
-                      )}
-                      
-                      <div className="absolute inset-0 border-[20px] border-black/20 rounded-[1.8rem] pointer-events-none" />
-                      
-                      {/* Scanning Line Animation */}
-                      <motion.div 
-                        initial={{ top: '0%' }}
-                        animate={{ top: '100%' }}
-                        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                        className="absolute left-0 right-0 h-1 bg-amber-400 shadow-[0_0_15px_rgba(251,191,36,1)] z-10"
-                      />
-                      
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-48 h-64 border-2 border-white/30 rounded-[3rem] dashed shadow-[0_0_0_9999px_rgba(0,0,0,0.4)]" />
-                      </div>
-
-                      <div className="absolute bottom-4 left-0 right-0 text-center px-4">
-                        <span className="bg-amber-400 text-black text-[8px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg">
-                          {verificationStep}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={handleVerify}
-                      disabled={isVerifying}
-                      className="w-full bg-white text-black font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] hover:bg-amber-400 transition-all flex items-center justify-center gap-2"
-                    >
-                      <Camera className="w-4 h-4" />
-                      Start Face Scan
-                    </button>
-                  )}
+                  <button 
+                    type="button"
+                    onClick={() => setIsFaceModalOpen(true)}
+                    className="w-full bg-white hover:bg-amber-400 text-black font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] transition-all flex items-center justify-center gap-2"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Verify Identity Scanner
+                  </button>
                 </div>
               )}
 
@@ -612,6 +763,13 @@ export default function UserTasks() {
           </div>
         )}
       </AnimatePresence>
+      
+      {/* Face Biometric Verification Modal */}
+      <FaceVerification 
+        isOpen={isFaceModalOpen}
+        onClose={() => setIsFaceModalOpen(false)}
+        onVerified={handleFaceVerified}
+      />
     </div>
   );
 }

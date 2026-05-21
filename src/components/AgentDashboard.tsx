@@ -4,6 +4,7 @@ import { Users, UserPlus, ClipboardList, TrendingUp, Search, X, CheckCircle2, Sh
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import DatePicker from './DatePicker';
 
 interface Host {
   id: string;
@@ -157,15 +158,50 @@ export default function AgentDashboard() {
     assignedTo: ''
   });
 
+  const [customDeadlineDate, setCustomDeadlineDate] = React.useState('');
+  const [deadlineError, setDeadlineError] = React.useState('');
+
+  const validateDeadlineDate = (dateVal: string): boolean => {
+    if (!dateVal) {
+      setDeadlineError('Date is required');
+      return false;
+    }
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) {
+      setDeadlineError('Invalid date format');
+      return false;
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(d);
+    selectedDate.setHours(0, 0, 0, 0);
+    
+    if (selectedDate < today) {
+      setDeadlineError('Deadline cannot be in the past');
+      return false;
+    }
+    setDeadlineError('');
+    return true;
+  };
+
   const handleCreateTask = async () => {
     if (!newTask.title || !auth.currentUser) return;
+    
+    let taskDeadline = newTask.deadline;
+    if (newTask.deadline === 'custom') {
+      if (!validateDeadlineDate(customDeadlineDate)) {
+        return;
+      }
+      taskDeadline = customDeadlineDate;
+    }
+
     try {
       const taskData = {
         title: newTask.title,
         reward: newTask.reward,
         rewardType: newTask.rewardType,
         progress: 0,
-        deadline: newTask.deadline,
+        deadline: taskDeadline,
         status: 'available',
         assignedTo: newTask.assignedTo || null,
         agencyId: agencyInfo.id,
@@ -175,6 +211,8 @@ export default function AgentDashboard() {
       await addDoc(collection(db, 'tasks'), taskData);
       setShowTaskModal(false);
       setNewTask({ title: '', reward: 1000, rewardType: 'coins', deadline: '7 days', assignedTo: '' });
+      setCustomDeadlineDate('');
+      setDeadlineError('');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'tasks');
     }
@@ -811,9 +849,10 @@ export default function AgentDashboard() {
             onClick={() => setShowProfileEdit(false)}
           >
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0, y: 30 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 30 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
               className="bg-zinc-950 border border-zinc-900 w-full max-w-sm rounded-[3rem] overflow-hidden shadow-2xl relative"
               onClick={e => e.stopPropagation()}
             >
@@ -1013,20 +1052,60 @@ export default function AgentDashboard() {
 
                   <div className="space-y-2">
                     <label className="text-zinc-500 text-[10px] font-black uppercase ml-1">Deadline</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-1.5">
                       {['3 days', '7 days', '30 days'].map(d => (
                         <button
+                          type="button"
                           key={d}
-                          onClick={() => setNewTask({...newTask, deadline: d})}
+                          onClick={() => {
+                            setNewTask({...newTask, deadline: d});
+                            setCustomDeadlineDate('');
+                            setDeadlineError('');
+                          }}
                           className={cn(
-                            "py-3 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all",
+                            "py-3 rounded-xl border text-[9px] font-black uppercase tracking-tighter transition-all",
                             newTask.deadline === d ? "bg-zinc-800 border-zinc-700 text-white" : "bg-zinc-950 border-zinc-900 text-zinc-600 hover:border-zinc-800"
                           )}
                         >
                           {d}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewTask({...newTask, deadline: 'custom'});
+                          const tomorrow = new Date();
+                          tomorrow.setDate(tomorrow.getDate() + 1);
+                          const dateStr = tomorrow.toISOString().split('T')[0];
+                          setCustomDeadlineDate(dateStr);
+                          setDeadlineError('');
+                        }}
+                        className={cn(
+                          "py-3 rounded-xl border text-[9px] font-black uppercase tracking-tighter transition-all",
+                          newTask.deadline === 'custom' ? "bg-zinc-800 border-zinc-700 text-white" : "bg-zinc-950 border-zinc-900 text-zinc-600 hover:border-zinc-800"
+                        )}
+                      >
+                        Custom
+                      </button>
                     </div>
+
+                    {newTask.deadline === 'custom' && (
+                      <div className="mt-2 space-y-1">
+                        <DatePicker
+                          value={customDeadlineDate}
+                          onChange={(val) => {
+                            setCustomDeadlineDate(val);
+                            validateDeadlineDate(val);
+                          }}
+                          error={deadlineError}
+                        />
+                        {deadlineError ? (
+                          <p className="text-red-500 text-[9px] font-bold uppercase tracking-wider pl-1 font-mono">{deadlineError}</p>
+                        ) : (
+                          <p className="text-zinc-500 text-[8px] font-medium uppercase tracking-wider pl-1">Specify a valid active future target date</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <label className="text-zinc-500 text-[10px] font-black uppercase ml-1">Assign to (Optional)</label>

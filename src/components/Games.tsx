@@ -42,8 +42,14 @@ export default function Games() {
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [gameResult, setGameResult] = React.useState<any>(null);
 
+  const [dicePrediction, setDicePrediction] = React.useState("over");
+  const [diceValue, setDiceValue] = React.useState(1);
+  const [rouletteBetType, setRouletteBetType] = React.useState("color");
+  const [rouletteBetValue, setRouletteBetValue] = React.useState("red");
+
   React.useEffect(() => {
     if (!auth.currentUser) return;
+
     const unsub = onSnapshot(doc(db, 'users', auth.currentUser.uid), (snap) => {
       if (snap.exists()) {
         setBalance(snap.data().coins || 0);
@@ -69,11 +75,14 @@ export default function Games() {
 
       if (selectedGame.isDice) {
         endpoint = "/api/games/dice";
-        body.prediction = "over"; // Default
+        body.prediction = dicePrediction;
+        if (dicePrediction === 'number') {
+          body.value = diceValue;
+        }
       } else if (selectedGame.isRoulette) {
         endpoint = "/api/games/roulette";
-        body.betType = "color";
-        body.betValue = "red";
+        body.betType = rouletteBetType;
+        body.betValue = rouletteBetValue;
       }
 
       const res = await fetch(endpoint, {
@@ -187,6 +196,84 @@ export default function Games() {
               </div>
 
               <div className="space-y-6">
+                
+                {/* Dice Options */}
+                {selectedGame.isDice && (
+                  <div className="bg-black/40 rounded-[2rem] p-6 border border-zinc-800 space-y-4">
+                    <p className="text-zinc-500 text-[9px] font-black uppercase tracking-widest text-center">Prediction</p>
+                    <div className="flex gap-2 justify-center">
+                      {["over", "under", "number"].map(p => (
+                        <button 
+                          key={p} 
+                          onClick={() => setDicePrediction(p)} 
+                          className={cn("px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", dicePrediction === p ? "bg-amber-400 text-black shadow-lg shadow-amber-400/20" : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700")}
+                        >
+                          {p === "over" ? "Over (4-6)" : p === "under" ? "Under (1-3)" : "Exact #"}
+                        </button>
+                      ))}
+                    </div>
+                    {dicePrediction === "number" && (
+                      <div className="flex gap-2 justify-center mt-2">
+                         {[1, 2, 3, 4, 5, 6].map(n => (
+                           <button 
+                             key={n} 
+                             onClick={() => setDiceValue(n)} 
+                             className={cn("w-10 h-10 rounded-lg text-sm font-black transition-all", diceValue === n ? "bg-amber-400 text-black shadow-lg shadow-amber-400/20" : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700")}
+                           >
+                             {n}
+                           </button>
+                         ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Roulette Options */}
+                {selectedGame.isRoulette && (
+                  <div className="bg-black/40 rounded-[2rem] p-6 border border-zinc-800 space-y-4">
+                    <p className="text-zinc-500 text-[9px] font-black uppercase tracking-widest text-center">Bet Type</p>
+                    <div className="flex gap-2 justify-center flex-wrap">
+                      {[
+                        { type: "color", label: "Color" },
+                        { type: "even_odd", label: "Even / Odd" },
+                        { type: "number", label: "Number" }
+                      ].map(t => (
+                        <button 
+                          key={t.type} 
+                          onClick={() => { setRouletteBetType(t.type); setRouletteBetValue(t.type === 'color' ? 'red' : t.type === 'even_odd' ? 'even' : '0'); }} 
+                          className={cn("px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", rouletteBetType === t.type ? "bg-amber-400 text-black shadow-lg shadow-amber-400/20" : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700")}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    {rouletteBetType === "color" && (
+                      <div className="flex gap-2 justify-center mt-2">
+                        <button onClick={() => setRouletteBetValue("red")} className={cn("px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", rouletteBetValue === "red" ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-zinc-800 text-red-500 opacity-50 hover:opacity-100")}>Red</button>
+                        <button onClick={() => setRouletteBetValue("black")} className={cn("px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", rouletteBetValue === "black" ? "bg-zinc-950 text-white shadow-lg shadow-black/20 border border-zinc-800" : "bg-zinc-800 text-zinc-400 opacity-50 hover:opacity-100")}>Black</button>
+                      </div>
+                    )}
+
+                    {rouletteBetType === "even_odd" && (
+                      <div className="flex gap-2 justify-center mt-2">
+                        <button onClick={() => setRouletteBetValue("even")} className={cn("px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", rouletteBetValue === "even" ? "bg-amber-400 text-black shadow-lg shadow-amber-400/20" : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700")}>Even</button>
+                        <button onClick={() => setRouletteBetValue("odd")} className={cn("px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", rouletteBetValue === "odd" ? "bg-amber-400 text-black shadow-lg shadow-amber-400/20" : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700")}>Odd</button>
+                      </div>
+                    )}
+
+                    {rouletteBetType === "number" && (
+                      <div className="flex justify-center mt-2">
+                        <div className="flex items-center justify-center gap-6">
+                           <button onClick={() => setRouletteBetValue(String(Math.max(0, parseInt(rouletteBetValue as string || '0') - 1)))} className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center text-white active:scale-90 transition-all">-</button>
+                           <span className="text-2xl font-black text-white italic">{rouletteBetValue}</span>
+                           <button onClick={() => setRouletteBetValue(String(Math.min(36, parseInt(rouletteBetValue as string || '0') + 1)))} className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center text-white active:scale-90 transition-all">+</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="bg-black/40 rounded-[2rem] p-6 border border-zinc-800 space-y-4">
                   <p className="text-zinc-500 text-[9px] font-black uppercase tracking-widest text-center">Place Your Bet</p>
                   <div className="flex items-center justify-center gap-6">

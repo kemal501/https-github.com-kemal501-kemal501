@@ -12,6 +12,7 @@ import AdminPanel from './components/AdminPanel';
 import Gifts from './components/Gifts';
 import ModerationTools from './components/ModerationTools';
 import RoomView from './components/RoomView';
+import WaitlistModal from './components/WaitlistModal';
 import AgentDashboard from './components/AgentDashboard';
 import UserTasks from './components/UserTasks';
 import Games from './components/Games';
@@ -25,55 +26,97 @@ import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from
 
 // --- MOCK COMPONENTS ---
 
-const RoomCard = ({ title, host, viewers, type, onJoin, onShowProfile }: { key?: any, title: string, host: string, viewers: string, type: 'voice' | 'video', onJoin: () => void, onShowProfile: (host: string) => void }) => (
-  <motion.div 
-    whileHover={{ 
-      y: -8, 
-      scale: 1.02,
-      transition: { duration: 0.3, ease: "easeOut" }
-    }}
-    onClick={onJoin}
-    className="relative group cursor-pointer overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 aspect-[4/5] shadow-xl hover:shadow-2xl hover:shadow-amber-400/5 transition-all duration-300"
-  >
-    <img 
-      src={`https://picsum.photos/seed/${host}/400/500`} 
-      alt={title}
-      className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-700"
-      referrerPolicy="no-referrer"
-    />
-    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
-    
-    <div className="absolute top-4 left-4 flex gap-2">
-      <div className="bg-red-600/90 backdrop-blur-md px-2 py-0.5 rounded-lg flex items-center gap-1">
-        <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-        <span className="text-white text-[10px] font-black uppercase tracking-tighter">Live</span>
-      </div>
-      <div className="bg-black/50 backdrop-blur-md px-2 py-0.5 rounded-lg flex items-center gap-1">
-        <Users className="w-3 h-3 text-white" />
-        <span className="text-white text-[10px] font-black">{viewers}</span>
-      </div>
-    </div>
+const getOccupancyInfo = (viewersStr: string) => {
+  let num = 0;
+  if (viewersStr) {
+    const cleanStr = viewersStr.toString().trim().toUpperCase();
+    if (cleanStr.endsWith('K')) {
+      num = parseFloat(cleanStr.replace('K', '')) * 1000;
+    } else if (cleanStr.endsWith('M')) {
+      num = parseFloat(cleanStr.replace('M', '')) * 1000000;
+    } else {
+      num = parseFloat(cleanStr) || 0;
+    }
+  }
 
-    <div className="absolute bottom-4 left-4 right-4">
-      <div className="flex items-center gap-2 mb-2">
-        {type === 'voice' ? <Mic className="w-4 h-4 text-amber-400" /> : <Radio className="w-4 h-4 text-blue-400" />}
-        <h3 className="text-white font-bold truncate text-sm">{title}</h3>
-      </div>
-      <div className="flex items-center gap-2">
-        <div 
-          onClick={(e) => { e.stopPropagation(); onShowProfile(host); }}
-          className="w-6 h-6 rounded-full border border-white/20 overflow-hidden hover:scale-110 transition-transform active:scale-95 z-20 relative"
-        >
-          <img src={`https://i.pravatar.cc/100?u=${host}`} alt={host} />
+  if (num < 500) {
+    return {
+      colorBg: "bg-emerald-500/15 border-emerald-500/25 text-emerald-400",
+      dotBg: "bg-emerald-400",
+      label: "Low Pop"
+    };
+  } else if (num < 1500) {
+    return {
+      colorBg: "bg-amber-500/15 border-amber-500/25 text-amber-400",
+      dotBg: "bg-amber-400",
+      label: "Medium Pop"
+    };
+  } else {
+    return {
+      colorBg: "bg-rose-500/15 border-rose-500/25 text-rose-400",
+      dotBg: "bg-rose-400",
+      label: "Nearly Full"
+    };
+  }
+};
+
+const RoomCard = ({ title, host, viewers, type, onJoin, onShowProfile }: { key?: any, title: string, host: string, viewers: string, type: 'voice' | 'video', onJoin: () => void, onShowProfile: (host: string) => void }) => {
+  const occupancy = getOccupancyInfo(viewers);
+
+  return (
+    <motion.div 
+      whileHover={{ 
+        y: -8, 
+        scale: 1.02,
+        transition: { duration: 0.3, ease: "easeOut" }
+      }}
+      onClick={onJoin}
+      className="relative group cursor-pointer overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 aspect-[4/5] shadow-xl hover:shadow-2xl hover:shadow-amber-400/5 transition-all duration-300"
+    >
+      <img 
+        src={`https://picsum.photos/seed/${host}/400/500`} 
+        alt={title}
+        className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-700"
+        referrerPolicy="no-referrer"
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+      
+      <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-1.5 justify-start items-center">
+        <div className="bg-red-600/90 backdrop-blur-md px-2 py-0.5 rounded-lg flex items-center gap-1 shrink-0">
+          <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+          <span className="text-white text-[10px] font-black uppercase tracking-tighter">Live</span>
         </div>
-        <div className="flex items-center gap-1 min-w-0">
-          <p className="text-white/70 text-xs font-medium truncate">@{host}</p>
-          {host === 'Abebe' && <CheckCircle2 className="w-3 h-3 text-blue-400 flex-shrink-0" />}
+        <div className="bg-black/55 backdrop-blur-md px-2 py-0.5 rounded-lg flex items-center gap-1 shrink-0">
+          <Users className="w-3 h-3 text-white" />
+          <span className="text-white text-[10px] font-black">{viewers}</span>
+        </div>
+        <div className={cn("backdrop-blur-md px-2 py-0.5 rounded-lg flex items-center gap-1 border text-[8px] font-black uppercase tracking-widest shrink-0 transition-all", occupancy.colorBg)}>
+          <span className={cn("w-1 h-1 rounded-full animate-ping", occupancy.dotBg)} />
+          <span>{occupancy.label}</span>
         </div>
       </div>
-    </div>
-  </motion.div>
-);
+
+      <div className="absolute bottom-4 left-4 right-4">
+        <div className="flex items-center gap-2 mb-2">
+          {type === 'voice' ? <Mic className="w-4 h-4 text-amber-400" /> : <Radio className="w-4 h-4 text-blue-400" />}
+          <h3 className="text-white font-bold truncate text-sm">{title}</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <div 
+            onClick={(e) => { e.stopPropagation(); onShowProfile(host); }}
+            className="w-6 h-6 rounded-full border border-white/20 overflow-hidden hover:scale-110 transition-transform active:scale-95 z-20 relative"
+          >
+            <img src={`https://i.pravatar.cc/100?u=${host}`} alt={host} />
+          </div>
+          <div className="flex items-center gap-1 min-w-0">
+            <p className="text-white/70 text-xs font-medium truncate">@{host}</p>
+            {host === 'Abebe' && <CheckCircle2 className="w-3 h-3 text-blue-400 flex-shrink-0" />}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
 
 const NAVIGATION = [
   { id: 'discover', icon: Home, label: 'Discover' },
@@ -89,7 +132,8 @@ export default function App() {
   const [activeTab, setActiveTab] = React.useState('discover');
   const [showGiftPanel, setShowGiftPanel] = React.useState(false);
   const [isJoining, setIsJoining] = React.useState(false);
-  const [activeRoom, setActiveRoom] = React.useState<{ id: string, title: string, host: string, type: 'voice' | 'video', tier?: string } | null>(null);
+  const [activeRoom, setActiveRoom] = React.useState<{ id: string, title: string, host: string, type: 'voice' | 'video', tier?: string, [key: string]: any } | null>(null);
+  const [waitlistRoom, setWaitlistRoom] = React.useState<any | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [viewingProfile, setViewingProfile] = React.useState<string | null>(null);
   const [hostSearchQuery, setHostSearchQuery] = React.useState('');
@@ -255,18 +299,52 @@ export default function App() {
     return matchesSearch && matchesCategory;
   });
 
-  const joinRoom = (room: { id: string, title: string, host: string, type: 'voice' | 'video', tier?: string }) => {
+  const joinRoom = async (room: any) => {
     setIsJoining(true);
     setError(null);
     
+    let isRealRoom = false;
+    let roomDocData: any = null;
+
+    if (room.id) {
+      try {
+        const roomDoc = await getDoc(doc(db, 'rooms', room.id));
+        if (roomDoc.exists()) {
+          isRealRoom = true;
+          roomDocData = { id: roomDoc.id, ...roomDoc.data() };
+        }
+      } catch (err) {
+        console.error("Failed to fetch room from Firestore:", err);
+      }
+    }
+
+    if (isRealRoom && roomDocData) {
+      // For real rooms fetched from Firestore, check actual occupiedSeats against totalSeats
+      const occupiedSeats = roomDocData.seats?.filter((s: any) => s.occupied).length || 0;
+      const totalSeats = roomDocData.seats?.length || 24;
+      
+      if (occupiedSeats >= totalSeats) {
+        setIsJoining(false);
+        setWaitlistRoom(roomDocData);
+        return;
+      }
+    } else if (room.id && room.id.startsWith('room_')) {
+      // When a user attempts to join a mock room (ID starting with 'room_'), implement a 15% chance of being placed on a waitlist
+      if (Math.random() < 0.15) {
+        setIsJoining(false);
+        setWaitlistRoom(room);
+        return;
+      }
+    }
+    
     // Simulating secure node handshake
     setTimeout(() => {
-      // 10% chance of simulation error (e.g. room full or connection issue)
-      if (Math.random() < 0.1) {
-        setError("Connection timeout. The room might be full or private.");
+      // 5% chance of connection error
+      if (Math.random() < 0.05) {
+        setError("Connection timeout. The room might be private.");
         setIsJoining(false);
       } else {
-        setActiveRoom(room);
+        setActiveRoom(isRealRoom && roomDocData ? roomDocData : room);
         setIsJoining(false);
       }
     }, 1500);
@@ -342,6 +420,15 @@ export default function App() {
             room={activeRoom} 
             isHost={activeRoom.host === userProfile.displayName}
             onLeave={() => setActiveRoom(null)} 
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {waitlistRoom && (
+          <WaitlistModal 
+            room={waitlistRoom} 
+            onClose={() => setWaitlistRoom(null)}
           />
         )}
       </AnimatePresence>
@@ -747,6 +834,45 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Biometric Verification & Security Banner */}
+              <div className="relative overflow-hidden bg-gradient-to-r from-zinc-950 to-zinc-900 border border-amber-500/20 rounded-[2.5rem] p-6 shadow-2xl shadow-amber-500/5 group text-left">
+                {/* Decorative glow */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-400/5 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-400/10 transition-all duration-500" />
+                
+                <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
+                  <div className="flex items-center gap-4 text-left">
+                    <div className="w-12 h-12 bg-amber-400/10 border border-amber-400/30 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-400/5 flex-shrink-0">
+                      <ShieldCheck className="w-6 h-6 text-amber-400 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-white font-black uppercase text-xs tracking-wider">Identity & Biometrics Gateway</h3>
+                        <span className={cn(
+                          "text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md", 
+                          userProfile.isVerified 
+                            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25" 
+                            : "bg-red-500/15 text-red-400 border border-red-500/25"
+                        )}>
+                          {userProfile.isVerified ? 'Verified Human' : 'Verification Needed'}
+                        </span>
+                      </div>
+                      <p className="text-zinc-500 text-[9px] font-bold uppercase tracking-widest mt-1 leading-normal">
+                        Secure your workspace, verify your face, and run high-lit front or back camera scans.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    type="button"
+                    onClick={() => setShowFaceVerification(true)}
+                    className="w-full md:w-auto bg-amber-400 text-black px-6 py-3.5 rounded-2xl font-black uppercase tracking-wider text-[9px] hover:bg-amber-300 transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 shadow-xl shadow-amber-400/10 hover:shadow-amber-400/20 cursor-pointer"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Biometric Scan
+                  </button>
+                </div>
+              </div>
+
               {/* Theme Settings */}
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] flex items-center justify-between">
                 <div>
@@ -818,9 +944,10 @@ export default function App() {
               className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[120]"
             />
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0, y: 30 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              exit={{ scale: 0.95, opacity: 0, y: 30 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
               className="fixed inset-0 flex items-center justify-center p-6 z-[130] pointer-events-none"
             >
               <div className="bg-zinc-900 border border-zinc-800 rounded-[3rem] w-full max-w-sm overflow-hidden pointer-events-auto shadow-2xl relative">

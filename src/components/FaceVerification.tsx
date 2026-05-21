@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Camera, ShieldCheck, X, Loader2, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Camera, ShieldCheck, X, Loader2, Sparkles, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -19,19 +19,28 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const streamRef = React.useRef<MediaStream | null>(null);
 
-  const startCamera = async () => {
+  const [facingMode, setFacingMode] = React.useState<'user' | 'environment'>('user');
+
+  const startCamera = async (mode: 'user' | 'environment' = facingMode) => {
+    stopCamera();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode } });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
+      setFacingMode(mode);
       setStep('scanning');
       setErrorMsg(null);
     } catch (err) {
       console.error('Camera error:', err);
       setErrorMsg("Camera access denied or unavailable.");
     }
+  };
+
+  const toggleFacingMode = () => {
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    startCamera(nextMode);
   };
 
   const stopCamera = () => {
@@ -135,19 +144,38 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
 
                 <div className="relative aspect-square bg-zinc-900 rounded-[2.5rem] overflow-hidden border border-zinc-800">
                   {step === 'initial' && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-12 text-center space-y-6">
-                      <div className="w-20 h-20 bg-zinc-800 rounded-full flex items-center justify-center animate-pulse">
-                        <Camera className="w-10 h-10 text-zinc-600" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4">
+                      <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center animate-pulse">
+                        <Camera className="w-8 h-8 text-amber-400" />
                       </div>
-                      <div className="space-y-2">
-                        <p className="text-white font-bold text-sm">Authentic Biometrics Required</p>
-                        <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest leading-loose">
-                          Please ensure your face is well-lit and clearly visible in the frame.
-                        </p>
+                      <div className="space-y-2 max-w-[280px]">
+                        <p className="text-white font-black text-xs uppercase tracking-wider">Face Biometric Setup</p>
+                        <ul className="text-zinc-500 text-[9px] font-bold uppercase tracking-wide text-left space-y-1 md:space-y-1.5 list-none pl-0">
+                          <li className="flex items-center gap-1.5 leading-snug">
+                            <span className="w-1 h-1 bg-amber-400 rounded-full flex-shrink-0" />
+                            <span>Allow camera to front & back view</span>
+                          </li>
+                          <li className="flex items-center gap-1.5 leading-snug">
+                            <span className="w-1 h-1 bg-amber-400 rounded-full flex-shrink-0" />
+                            <span>Look directly into the camera</span>
+                          </li>
+                          <li className="flex items-center gap-1.5 leading-snug">
+                            <span className="w-1 h-1 bg-amber-400 rounded-full flex-shrink-0" />
+                            <span>Open mouth to show scan real person</span>
+                          </li>
+                          <li className="flex items-center gap-1.5 leading-snug">
+                            <span className="w-1 h-1 bg-amber-400 rounded-full flex-shrink-0" />
+                            <span>Brightly lit environment</span>
+                          </li>
+                          <li className="flex items-center gap-1.5 leading-snug">
+                            <span className="w-1 h-1 bg-amber-400 rounded-full flex-shrink-0" />
+                            <span>AI verified human presence</span>
+                          </li>
+                        </ul>
                       </div>
                       <button 
-                        onClick={startCamera}
-                        className="w-full bg-amber-400 text-black py-4 rounded-2xl font-black uppercase tracking-[0.2em] text-xs shadow-xl shadow-amber-400/20 active:scale-95 transition-all"
+                        onClick={() => startCamera()}
+                        className="w-full bg-amber-400 text-black py-3.5 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl shadow-amber-400/20 active:scale-95 transition-all"
                       >
                         Initiate Scanner
                       </button>
@@ -167,6 +195,28 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                         )}
                       />
                       <canvas ref={canvasRef} className="hidden" />
+                      
+                      {step === 'scanning' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFacingMode();
+                          }}
+                          className="absolute bottom-4 right-4 z-20 bg-black/85 hover:bg-black border border-zinc-800 px-3 py-1.5 rounded-xl text-amber-400 font-black text-[8px] uppercase tracking-widest flex items-center gap-1 shadow-lg shadow-black/50 pointer-events-auto cursor-pointer"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin-slow" />
+                          <span>Switch Mode ({facingMode === 'user' ? 'Front' : 'Back'})</span>
+                        </button>
+                      )}
+
+                      {step === 'scanning' && (
+                        <div className="absolute top-4 left-4 right-4 bg-black/80 backdrop-blur border border-zinc-800/80 px-3 py-1.5 rounded-xl text-center z-10 pointer-events-none">
+                          <p className="text-amber-400 font-extrabold text-[8px] uppercase tracking-wider animate-pulse leading-normal">
+                            instruction: look directly into the camera and open your mouth
+                          </p>
+                        </div>
+                      )}
                       
                       {/* Scanning UI Overlays */}
                       <div className="absolute inset-0 pointer-events-none">
@@ -205,14 +255,22 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                         )}
 
                         {step === 'failed' && (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 bg-red-500/20 backdrop-blur-md">
-                            <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center mb-4">
-                              <AlertCircle className="w-6 h-6 text-white" />
+                          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 bg-[#09090b]/95 backdrop-blur-md text-center z-30">
+                            <div className="w-12 h-12 bg-red-500/15 border border-red-500/30 rounded-2xl flex items-center justify-center mb-4">
+                              <AlertCircle className="w-6 h-6 text-red-500 duration-300" />
                             </div>
-                            <h4 className="text-white font-black text-[10px] uppercase tracking-widest mb-2">Verification Failed</h4>
-                            <p className="text-white/80 text-[10px] text-center font-medium leading-relaxed">
+                            <h4 className="text-white font-black text-xs uppercase tracking-widest mb-1">Verification Failed</h4>
+                            <p className="text-zinc-400 text-[10px] leading-relaxed max-w-[240px] mb-5">
                               {errorMsg}
                             </p>
+                            <button
+                              type="button"
+                              onClick={() => startCamera()}
+                              className="bg-amber-400 text-black font-black uppercase text-[8px] tracking-[0.15em] px-4 py-2.5 rounded-xl hover:bg-amber-300 transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-amber-400/15 pointer-events-auto"
+                            >
+                              <RefreshCw className="w-3 h-3 shrink-0" />
+                              Reset Scanner Feed
+                            </button>
                           </div>
                         )}
                       </div>
@@ -237,23 +295,27 @@ export default function FaceVerification({ isOpen, onClose, onVerified }: FaceVe
                 </div>
 
                 <div className="space-y-4">
-                  {(step === 'scanning' || step === 'failed') && (
+                  {step === 'scanning' && (
                     <button 
                       onClick={handleScan}
-                      className={cn(
-                        "w-full py-5 rounded-2xl font-black uppercase tracking-[0.3em] text-xs transition-all",
-                        step === 'failed' 
-                          ? "bg-red-500 text-white shadow-2xl shadow-red-500/30" 
-                          : "bg-amber-400 text-black shadow-2xl shadow-amber-400/30 active:scale-95"
-                      )}
+                      className="w-full py-5 rounded-2xl font-black uppercase tracking-[0.3em] text-xs bg-amber-400 text-black shadow-2xl shadow-amber-400/30 active:scale-95 transition-all cursor-pointer"
                     >
-                      {step === 'failed' ? 'Retry Identity Scan' : 'Process Identity'}
+                      Process Identity
+                    </button>
+                  )}
+                  {step === 'failed' && (
+                    <button 
+                      onClick={() => startCamera()}
+                      className="w-full py-5 rounded-2xl font-black uppercase tracking-[0.3em] text-xs bg-red-500 hover:bg-red-600 text-white shadow-2xl shadow-red-500/20 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Rescan Face & Retry
                     </button>
                   )}
                   <div className="flex items-start gap-3 bg-zinc-900/50 p-4 rounded-2xl border border-white/5">
                     <Sparkles className="w-4 h-4 text-amber-500 mt-1 flex-shrink-0" />
                     <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest leading-relaxed">
-                      Please look directly into the camera in a brightly lit environment. Your biometric scan is verified by AI to ensure real human presence.
+                      Please look directly into the camera and open your mouth to show and scan a real person face using either the front or back camera in a brightly lit environment. Your biometric scan is verified by AI to ensure real human presence.
                     </p>
                   </div>
                 </div>

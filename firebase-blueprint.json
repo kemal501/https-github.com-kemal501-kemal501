@@ -16,7 +16,8 @@
         "role": { "type": "string", "enum": ["user", "host", "agent"] },
         "bio": { "type": "string" },
         "category": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "following": { "type": "array" }
       },
       "required": ["displayName", "coins", "role"]
     },
@@ -107,12 +108,69 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "ownerId", "createdAt"]
+    },
+    "SittingReward": {
+      "title": "Sitting Reward",
+      "description": "Sitting/broadcasting time tracking and rewards for hosts and users.",
+      "type": "object",
+      "properties": {
+        "durationSeconds": { "type": "number" },
+        "claimedHalf": { "type": "boolean" },
+        "claimedFull": { "type": "boolean" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      }
+    },
+    "GlobalMusic": {
+      "title": "Global Music Broadcast",
+      "description": "Music currently broadcasting to all rooms in the application.",
+      "type": "object",
+      "properties": {
+        "isPlaying": { "type": "boolean" },
+        "title": { "type": "string" },
+        "playbackUrl": { "type": "string" },
+        "startedAt": { "type": "number" },
+        "duration": { "type": "number" },
+        "sender": { "type": "string" }
+      },
+      "required": ["isPlaying", "title", "playbackUrl"]
+    },
+    "Recording": {
+      "title": "Recording",
+      "description": "Saved broadcast session recording stored in Cloud Storage and indexed in Firestore.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "recordedAt": { "type": "string", "format": "date-time" },
+        "durationSeconds": { "type": "number" },
+        "fileSizeBytes": { "type": "number" },
+        "storageBucketUrl": { "type": "string" },
+        "status": { "type": "string" },
+        "trackTitle": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["title", "recordedAt", "durationSeconds", "storageBucketUrl", "status", "userId"]
+    },
+    "FollowInfo": {
+      "title": "Follow Info",
+      "description": "Information about a followed host/user.",
+      "type": "object",
+      "properties": {
+        "followedAt": { "type": "string", "format": "date" }
+      }
     }
   },
   "firestore": {
+    "global_music/{musicId}": {
+      "schema": "GlobalMusic",
+      "description": "Interactive global room audio state and synchronisation."
+    },
     "users/{userId}": {
       "schema": "User",
       "description": "User profile data."
+    },
+    "users/{userId}/following/{followingId}": {
+      "schema": "FollowInfo",
+      "description": "Subcollection tracking followed users/hosts."
     },
     "users/{userId}/task_completions/{taskId}": {
       "schema": "TaskCompletion",
@@ -121,6 +179,14 @@
     "users/{userId}/transactions/{transactionId}": {
       "schema": "Transaction",
       "description": "Users transaction history."
+    },
+    "users/{userId}/sitting_rewards/{sittingId}": {
+      "schema": "SittingReward",
+      "description": "Sitting reward tracking data."
+    },
+    "users/{userId}/recordings/{recordingId}": {
+      "schema": "Recording",
+      "description": "Saved broadcast session recording info."
     },
     "rooms/{roomId}": {
       "schema": "Room",

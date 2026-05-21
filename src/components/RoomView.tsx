@@ -5,10 +5,11 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, Shield, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key, ChevronDown } from 'lucide-react';
+import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, Shield, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key, ChevronDown, TrendingUp, Sparkle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import Gifts from './Gifts';
 import ChatSidebar from './ChatSidebar';
+import RoomAnalytics from './RoomAnalytics';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, getDoc, setDoc, arrayUnion, arrayRemove, increment } from 'firebase/firestore';
 
@@ -28,6 +29,7 @@ interface RoomViewProps {
     hostId: string;
     type: 'voice' | 'video';
     tier?: string;
+    description?: string;
   };
   isHost?: boolean;
   onLeave: () => void;
@@ -106,6 +108,8 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const [showVoiceFX, setShowVoiceFX] = React.useState(false);
   const [selectedConsoleUser, setSelectedConsoleUser] = React.useState<string | null>(null);
   const [selectedVoiceEffect, setSelectedVoiceEffect] = React.useState('none');
+  const [selectedEffectParamTab, setSelectedEffectParamTab] = React.useState('deep');
+  const [customProfileName, setCustomProfileName] = React.useState('');
   const [voiceFXEnabled, setVoiceFXEnabled] = React.useState(true);
   const [voiceSettings, setVoiceSettings] = React.useState<Record<string, { pitch: number, reverb: number, echo: number, clarity: number }>>({
     none: { pitch: 50, reverb: 0, echo: 0, clarity: 80 },
@@ -116,6 +120,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     echo: { pitch: 50, reverb: 95, echo: 80, clarity: 50 },
   });
   const [roomTitle, setRoomTitle] = React.useState(room.title);
+  const [roomDescription, setRoomDescription] = React.useState(room.description || '');
   const [streamQuality, setStreamQuality] = React.useState('1080p');
   const [activeConsoleTab, setActiveConsoleTab] = React.useState<'broadcast' | 'requests' | 'users' | 'permissions' | 'settings'>('broadcast');
   const [selectedUserToModerate, setSelectedUserToModerate] = React.useState<any>(null);
@@ -145,6 +150,221 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const [chatLimit, setChatLimit] = React.useState(50);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
 
+  const [hostProfileDetail, setHostProfileDetail] = React.useState<any>(null);
+  const [showHostCard, setShowHostCard] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!room?.hostId) return;
+    const hostRef = doc(db, 'users', room.hostId);
+    const unsub = onSnapshot(hostRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setHostProfileDetail(data);
+      } else {
+        setHostProfileDetail({
+          displayName: room.host,
+          performance: 82,
+          bio: 'Verified host, running active rooms and direct studio streams under Barca Protection.',
+          category: 'Social Room',
+          isFaceVerified: true
+        });
+      }
+    }, (error) => {
+      console.warn("Could not load host details dynamically:", error);
+      setHostProfileDetail({
+        displayName: room.host,
+        performance: 82,
+        bio: 'Verified host, running active rooms and direct studio streams under Barca Protection.',
+        category: 'Social Room',
+        isFaceVerified: true
+      });
+    });
+    return () => unsub();
+  }, [room?.hostId, room?.host]);
+
+  // Synchronized Room background music player with premier dual channel cross-fader
+  const [broadcastBgm, setBroadcastBgm] = React.useState<any>(null);
+  const bgmAudioRefA = React.useRef<HTMLAudioElement | null>(null);
+  const bgmAudioRefB = React.useRef<HTMLAudioElement | null>(null);
+  const [bgmActiveChannel, setBgmActiveChannel] = React.useState<'A' | 'B'>('A');
+  const bgmFadeIntervalRef = React.useRef<any>(null);
+  const bgmLoadedUrlRef = React.useRef<string>('');
+
+  React.useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'global_music', 'broadcast'), (snapshot) => {
+      if (snapshot.exists()) {
+        setBroadcastBgm(snapshot.data());
+      }
+    }, (err) => {
+      console.warn("Failed to subscribe to room synced BGM:", err);
+    });
+    return () => unsub();
+  }, []);
+
+  React.useEffect(() => {
+    if (!bgmAudioRefA.current) {
+      bgmAudioRefA.current = new Audio();
+    }
+    if (!bgmAudioRefB.current) {
+      bgmAudioRefB.current = new Audio();
+    }
+
+    const currentBgm = bgmActiveChannel === 'A' ? bgmAudioRefA.current : bgmAudioRefB.current;
+    const nextBgm = bgmActiveChannel === 'A' ? bgmAudioRefB.current : bgmAudioRefA.current;
+
+    const baseVolume = isBgmEnabled ? 0.35 : 0; // Soft baseline volume
+
+    // Determine incoming stream
+    let targetUrl = '';
+    if (isBgmEnabled && broadcastBgm && broadcastBgm.isPlaying) {
+      if (broadcastBgm.playbackUrl === 'device') {
+        targetUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
+      } else {
+        targetUrl = broadcastBgm.playbackUrl;
+      }
+    }
+
+    // A. Pause condition
+    if (!targetUrl) {
+      if (bgmFadeIntervalRef.current) {
+        clearInterval(bgmFadeIntervalRef.current);
+      }
+      const fadeDuration = 800;
+      const intervalTime = 40;
+      const totalSteps = fadeDuration / intervalTime;
+      let step = 0;
+      const initialVol = currentBgm.volume;
+
+      bgmFadeIntervalRef.current = setInterval(() => {
+        step++;
+        const progress = step / totalSteps;
+        currentBgm.volume = Math.max(0, initialVol * (1 - progress));
+        if (step >= totalSteps) {
+          if (bgmFadeIntervalRef.current) clearInterval(bgmFadeIntervalRef.current);
+          currentBgm.pause();
+          currentBgm.volume = 0;
+          bgmLoadedUrlRef.current = '';
+        }
+      }, intervalTime);
+
+      nextBgm.pause();
+      nextBgm.volume = 0;
+      return;
+    }
+
+    // B. Resume / Volume tweak on same URL
+    if (targetUrl === bgmLoadedUrlRef.current) {
+      if (currentBgm.paused) {
+        currentBgm.volume = 0;
+        if (broadcastBgm.startedAt) {
+          const elapsed = (Date.now() - broadcastBgm.startedAt) / 1000;
+          if (elapsed > 0) {
+            currentBgm.currentTime = elapsed % (broadcastBgm.duration || 180);
+          }
+        }
+        currentBgm.play().then(() => {
+          if (bgmFadeIntervalRef.current) clearInterval(bgmFadeIntervalRef.current);
+          const fadeDuration = 800;
+          const intervalTime = 40;
+          const totalSteps = fadeDuration / intervalTime;
+          let step = 0;
+          bgmFadeIntervalRef.current = setInterval(() => {
+            step++;
+            const progress = step / totalSteps;
+            currentBgm.volume = Math.min(baseVolume, baseVolume * progress);
+            if (step >= totalSteps) {
+              if (bgmFadeIntervalRef.current) clearInterval(bgmFadeIntervalRef.current);
+              currentBgm.volume = baseVolume;
+            }
+          }, intervalTime);
+        }).catch(err => {
+          console.warn("Ambient background music resumed deferred until client interaction:", err);
+          currentBgm.volume = baseVolume;
+        });
+      } else {
+        currentBgm.volume = baseVolume;
+      }
+      return;
+    }
+
+    // C. Transitioning switch to next track - cross-fading beautifully
+    if (bgmFadeIntervalRef.current) {
+      clearInterval(bgmFadeIntervalRef.current);
+    }
+
+    nextBgm.src = targetUrl;
+    nextBgm.load();
+
+    if (broadcastBgm.startedAt) {
+      const elapsed = (Date.now() - broadcastBgm.startedAt) / 1000;
+      if (elapsed > 0) {
+        nextBgm.currentTime = elapsed % (broadcastBgm.duration || 180);
+      }
+    }
+
+    nextBgm.volume = 0;
+    nextBgm.play().then(() => {
+      const fadeDuration = 1500;
+      const intervalTime = 40;
+      const totalSteps = fadeDuration / intervalTime;
+      let step = 0;
+      const initialVol = currentBgm.volume;
+
+      bgmFadeIntervalRef.current = setInterval(() => {
+        step++;
+        const progress = step / totalSteps;
+
+        currentBgm.volume = Math.max(0, initialVol * (1 - progress));
+        nextBgm.volume = Math.min(baseVolume, baseVolume * progress);
+
+        if (step >= totalSteps) {
+          if (bgmFadeIntervalRef.current) clearInterval(bgmFadeIntervalRef.current);
+          currentBgm.pause();
+          currentBgm.volume = 0;
+          nextBgm.volume = baseVolume;
+          setBgmActiveChannel(bgmActiveChannel === 'A' ? 'B' : 'A');
+          bgmLoadedUrlRef.current = targetUrl;
+        }
+      }, intervalTime);
+    }).catch(err => {
+      console.warn("Client side room background music switch failed / deferred:", err);
+      if (bgmFadeIntervalRef.current) clearInterval(bgmFadeIntervalRef.current);
+      currentBgm.pause();
+      currentBgm.volume = 0;
+      nextBgm.volume = baseVolume;
+      setBgmActiveChannel(bgmActiveChannel === 'A' ? 'B' : 'A');
+      bgmLoadedUrlRef.current = targetUrl;
+    });
+
+  }, [broadcastBgm, isBgmEnabled]);
+
+  // Clean up audience audio loop layers on unmount
+  React.useEffect(() => {
+    return () => {
+      if (bgmFadeIntervalRef.current) clearInterval(bgmFadeIntervalRef.current);
+      if (bgmAudioRefA.current) {
+        bgmAudioRefA.current.pause();
+        bgmAudioRefA.current = null;
+      }
+      if (bgmAudioRefB.current) {
+        bgmAudioRefB.current.pause();
+        bgmAudioRefB.current = null;
+      }
+    };
+  }, []);
+
+  // Sit & Earn States
+  const [showSitEarnPanel, setShowSitEarnPanel] = React.useState(false);
+  const [userRegDate, setUserRegDate] = React.useState<Date | null>(null);
+  const [sitEarnState, setSitEarnState] = React.useState({
+    durationSeconds: 0,
+    claimedHalf: false,
+    claimedFull: false,
+    lastUpdated: new Date()
+  });
+  const [localDuration, setLocalDuration] = React.useState<number>(0);
+  const [isClaimingReward, setIsClaimingReward] = React.useState<string | null>(null);
+
   const handleUpdateRoomSettings = async (updates: any) => {
     if (room.id.startsWith('room_')) return;
     try {
@@ -161,6 +381,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
 
   const [blockedUsers, setBlockedUsers] = React.useState<string[]>([]);
   const [bannedUsers, setBannedUsers] = React.useState<string[]>([]);
+  const [followedUsers, setFollowedUsers] = React.useState<string[]>([]);
 
   // Sync blocked users from user profile
   React.useEffect(() => {
@@ -173,6 +394,177 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     });
     return () => unsub();
   }, []);
+
+  // Sync followed users from user profile
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const followedRef = collection(db, 'users', auth.currentUser.uid, 'following');
+    const unsub = onSnapshot(followedRef, (snap) => {
+      setFollowedUsers(snap.docs.map(d => d.id));
+    }, (error) => {
+      console.warn("Followed users fetch warning:", error);
+    });
+    return () => unsub();
+  }, []);
+
+  const toggleFollow = async (userName: string) => {
+    if (!auth.currentUser) return;
+    const followingRef = doc(db, 'users', auth.currentUser.uid, 'following', userName);
+    try {
+      if (followedUsers.includes(userName)) {
+        await deleteDoc(followingRef);
+      } else {
+        await setDoc(followingRef, { followedAt: serverTimestamp() });
+      }
+    } catch (error) {
+      console.error("Failed to follow/unfollow:", error);
+    }
+  };
+
+  // Sync user registration and Sitting rewards
+  const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
+  
+  const isNewUser = React.useMemo(() => {
+    if (!userRegDate) return false;
+    return (new Date().getTime() - userRegDate.getTime()) < (8 * 24 * 60 * 60 * 1000);
+  }, [userRegDate]);
+
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    getDoc(userRef).then(snap => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.createdAt) {
+          setUserRegDate(data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt));
+        } else {
+          setUserRegDate(new Date());
+        }
+      }
+    }).catch(e => {
+      console.error("Error loading user profile", e);
+      setUserRegDate(new Date());
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const sitRef = doc(db, 'users', auth.currentUser.uid, 'sitting_rewards', todayStr);
+    const unsub = onSnapshot(sitRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setSitEarnState({
+          durationSeconds: data.durationSeconds || 0,
+          claimedHalf: data.claimedHalf || false,
+          claimedFull: data.claimedFull || false,
+          lastUpdated: data.lastUpdated ? data.lastUpdated.toDate() : new Date()
+        });
+      } else {
+        setSitEarnState({
+          durationSeconds: 0,
+          claimedHalf: false,
+          claimedFull: false,
+          lastUpdated: new Date()
+        });
+      }
+    }, (err) => {
+      console.error("Error observing sitting rewards", err);
+    });
+
+    return () => unsub();
+  }, [todayStr]);
+
+  // Sync state duration seconds to localDuration
+  React.useEffect(() => {
+    setLocalDuration(sitEarnState.durationSeconds);
+  }, [sitEarnState.durationSeconds]);
+
+  const isUserSitting = React.useMemo(() => {
+    return seats.some(s => s.occupied && s.user?.name === currentUserDisplayName);
+  }, [seats, currentUserDisplayName]);
+
+  // Sitting progress real-time ticker
+  React.useEffect(() => {
+    if (!isUserSitting) return;
+
+    const interval = setInterval(() => {
+      setLocalDuration(prev => {
+        const next = prev + 1;
+        
+        // Every 10 seconds, backup to Firestore
+        if (next % 10 === 0 && auth.currentUser) {
+          const sitRef = doc(db, 'users', auth.currentUser.uid, 'sitting_rewards', todayStr);
+          setDoc(sitRef, {
+            durationSeconds: next,
+            lastUpdated: serverTimestamp()
+          }, { merge: true }).catch(err => console.error("Error backing up sit seconds", err));
+        }
+        
+        return next;
+      });
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+      // Immediately save progress when stopping sitting
+      if (auth.currentUser) {
+        setLocalDuration(currentVal => {
+          const sitRef = doc(db, 'users', auth.currentUser.uid, 'sitting_rewards', todayStr);
+          setDoc(sitRef, {
+            durationSeconds: currentVal,
+            lastUpdated: serverTimestamp()
+          }, { merge: true }).catch(err => console.error("Final persist error", err));
+          return currentVal;
+        });
+      }
+    };
+  }, [isUserSitting, todayStr]);
+
+  const claimSittingReward = async (isHalf: boolean) => {
+    if (!auth.currentUser) return;
+    const userId = auth.currentUser.uid;
+    const typeStr = isHalf ? 'half' : 'full';
+    
+    setIsClaimingReward(typeStr);
+    
+    try {
+      const sitRef = doc(db, 'users', userId, 'sitting_rewards', todayStr);
+      
+      const snap = await getDoc(sitRef);
+      const data = snap.data() || {};
+      if (isHalf && data.claimedHalf) return;
+      if (!isHalf && data.claimedFull) return;
+
+      const rewardCoins = isNewUser
+        ? 10000000
+        : 5000000;
+
+      await setDoc(sitRef, {
+        [isHalf ? 'claimedHalf' : 'claimedFull']: true,
+        durationSeconds: localDuration,
+        lastUpdated: serverTimestamp()
+      }, { merge: true });
+
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        coins: increment(rewardCoins)
+      });
+
+      await addDoc(collection(db, 'users', userId, 'transactions'), {
+        type: 'reward',
+        amount: rewardCoins,
+        description: `Claimed Sit & Earn (${isHalf ? '1 Hour' : '2 Hours'} milestone) as ${isNewUser ? 'New User' : 'Established User'}`,
+        createdAt: serverTimestamp(),
+        status: 'completed'
+      });
+
+      alert(`Success! Deposited +${rewardCoins.toLocaleString()} Coins directly into your balance.`);
+    } catch (err) {
+      console.error("Error claiming reward", err);
+    } finally {
+      setIsClaimingReward(null);
+    }
+  };
 
   // Sync with Firestore
   React.useEffect(() => {
@@ -238,11 +630,15 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
           setIsPrivate(data.settings.isPrivate ?? false);
           setEntryFee(data.settings.entryFee ?? 100);
           setRoomPassword(data.settings.password || '');
+          if (data.settings.voiceSettings) {
+            setVoiceSettings(data.settings.voiceSettings);
+          }
         }
         if (data.bannedUsers) {
           setBannedUsers(data.bannedUsers);
         }
         if (data.title) setRoomTitle(data.title);
+        if (data.description !== undefined) setRoomDescription(data.description);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `rooms/${room.id}`);
@@ -510,6 +906,8 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     }
   };
 
+  const initialMessagesLoadedRef = React.useRef(false);
+
   // Real-time chat listener
   React.useEffect(() => {
     if (room.id.startsWith('room_')) return;
@@ -518,6 +916,22 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     const q = firestoreQuery(messagesRef, firestoreOrderBy('createdAt', 'asc'), firestoreLimit(chatLimit));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (initialMessagesLoadedRef.current) {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            // Trigger animation for newly added gifts for everyone except the sender 
+            // (sender already triggers it locally for immediate feedback)
+            if (data.giftData && data.actualSenderId !== auth.currentUser?.uid) {
+              setActiveGift(data.giftData);
+              setTimeout(() => setActiveGift(null), 3500);
+            }
+          }
+        });
+      } else {
+        initialMessagesLoadedRef.current = true;
+      }
+
       const newMessages = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -597,8 +1011,10 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
         
         await addDoc(collection(db, 'rooms', room.id, 'messages'), {
           senderId: 'system',
+          actualSenderId: auth.currentUser.uid,
           senderName: 'System',
           text: `${auth.currentUser.displayName || 'A user'} sent a ${gift.name} to ${target === 'host' ? room.host : 'themselves'}!`,
+          giftData: gift,
           createdAt: serverTimestamp()
         });
 
@@ -668,20 +1084,76 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     }
   };
 
-  const handleSeatClick = (seat: any) => {
+  const leaveSeat = async () => {
+    const newSeats = seats.map(s => 
+      s.user?.name === currentUserDisplayName ? { ...s, occupied: false, user: null } : s
+    );
+    if (room.id.startsWith('room_')) {
+      setSeats(newSeats);
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'rooms', room.id), { seats: newSeats });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `rooms/${room.id}`);
+    }
+  };
+
+  const handleSeatClick = async (seat: any) => {
+    const isMySeat = seat.occupied && seat.user && seat.user.name === currentUserDisplayName;
+
+    if (seat.occupied && !isMySeat) {
+      if (activeSeatInfoId === seat.id) {
+        setActiveSeatInfoId(null);
+      } else {
+        setActiveSeatInfoId(seat.id);
+      }
+      return;
+    }
+
     if (isHost) {
       openModeration(seat);
     } else {
       if (seat.occupied) {
-        // Just show info for guests if occupied
+        // Just show info for guests if occupied and it is theirs
         if (activeSeatInfoId === seat.id) {
           setActiveSeatInfoId(null);
         } else {
           setActiveSeatInfoId(seat.id);
         }
       } else if (!seat.isLocked) {
-        // Request to join if empty and not locked
-        openModeration(seat);
+        // Instant join if empty and not locked
+        const alreadyInSeat = seats.some(s => s.occupied && s.user?.name === currentUserDisplayName);
+        if (alreadyInSeat) return;
+
+        const currentUser = auth.currentUser?.displayName || 'Guest';
+        if (bannedUsers.includes(currentUser)) {
+          alert("You are banned from this room.");
+          return;
+        }
+
+        const newUser = { 
+          name: currentUser, 
+          avatar: `https://i.pravatar.cc/100?u=${auth.currentUser?.uid || 'guest'}`, 
+          videoEnabled: false,
+          isMuted: false
+        };
+
+        const newSeats = seats.map(s => 
+          s.id === seat.id 
+            ? { ...s, occupied: true, user: newUser }
+            : s
+        );
+
+        if (room.id.startsWith('room_')) {
+          setSeats(newSeats);
+        } else {
+          try {
+            await updateDoc(doc(db, 'rooms', room.id), { seats: newSeats });
+          } catch (error) {
+            handleFirestoreError(error, OperationType.UPDATE, `rooms/${room.id}`);
+          }
+        }
       } else {
         // Shake if locked
         setShakingSeatId(seat.id);
@@ -721,48 +1193,269 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     }
   };
 
-  const SeatOverlay = ({ seat, onModerate }: { seat: any, onModerate: () => void }) => (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.8, y: 10, x: "-50%" }}
-      animate={{ opacity: 1, scale: 1, y: 0, x: "-50%" }}
-      exit={{ opacity: 0, scale: 0.8, y: 10, x: "-50%" }}
-      transition={{ type: "spring", stiffness: 400, damping: 25 }}
-      style={{ originY: 1 }}
-      className="absolute z-[100] bottom-full mb-3 left-1/2 w-40 bg-black/90 backdrop-blur-md rounded-xl p-3 text-white text-[10px] shadow-2xl border border-zinc-800"
-      onClick={(e) => { e.stopPropagation(); onModerate(); }}
-    >
-      <p className="font-bold mb-1 truncate">{seat.user?.name || `Seat ${seat.id + 1}`}</p>
-      {seat.occupied && seat.user && (
-        <>
-          <p className="opacity-70 flex items-center gap-1 mb-0.5">
-            {seat.user.isMuted ? <MicOff className="w-3 h-3 text-red-500" /> : <Mic className="w-3 h-3 text-green-500" />}
-            {seat.user.isMuted ? 'Muted' : 'Speaking'}
-          </p>
-          <p className="opacity-70 flex items-center gap-1">
-            <Wand2 className="w-3 h-3 text-purple-400" />
-            {seat.user.voiceEffect || 'None'}
-          </p>
-          {isHost && (
-            <div className="mt-2 space-y-2">
-              <button onClick={onModerate} className="w-full bg-amber-400 text-black py-1 font-bold rounded-lg text-[9px] hover:bg-amber-300">Moderate</button>
-              <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest text-center mt-1">Apply FX</p>
-              <div className="grid grid-cols-3 gap-1">
-                {['deep', 'helium', 'robotic'].map(effect => (
-                    <button 
-                      key={effect}
-                      onClick={(e) => { e.stopPropagation(); applyVoiceEffect(seat.user.name, effect); }}
-                      className="bg-zinc-800 text-[8px] p-1 rounded-md hover:bg-purple-600 truncate"
-                    >
-                      {effect}
-                    </button>
-                ))}
+  const SeatOverlay = ({ seat, onModerate, onLeaveSeat }: { seat: any, onModerate: () => void, onLeaveSeat: () => void }) => {
+    const isMySeat = seat.occupied && seat.user && seat.user.name === currentUserDisplayName;
+    const isFollowed = seat.user ? followedUsers.includes(seat.user.name) : false;
+    const isBlocked = seat.user ? blockedUsers.includes(seat.user.name) : false;
+
+    // Simulate speaker metrics based on username hash seed for realism and high premium UI polish
+    const simulatedLevel = React.useMemo(() => {
+      if (!seat.user) return 1;
+      let hash = 0;
+      for (let i = 0; i < seat.user.name.length; i++) {
+        hash = seat.user.name.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return Math.abs(hash % 20) + 1;
+    }, [seat.user]);
+
+    const simulatedFollowers = React.useMemo(() => {
+      if (!seat.user) return '0';
+      let hash = 0;
+      for (let i = 0; i < seat.user.name.length; i++) {
+        hash = seat.user.name.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const base = Math.abs(hash % 100);
+      return base < 10 ? `${(base + 1.2).toFixed(1)}K` : `${(base / 10).toFixed(1)}K`;
+    }, [seat.user]);
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.85, y: 15, x: "-50%" }}
+        animate={{ opacity: 1, scale: 1, y: 0, x: "-50%" }}
+        exit={{ opacity: 0, scale: 0.85, y: 15, x: "-50%" }}
+        transition={{ type: "spring", stiffness: 450, damping: 28 }}
+        style={{ originY: 1 }}
+        className="absolute z-[100] bottom-full mb-3.5 left-1/2 w-60 bg-zinc-950/95 border border-zinc-800/80 backdrop-blur-xl rounded-2xl p-4 text-white text-[10px] shadow-2xl flex flex-col space-y-3 cursor-default"
+        onClick={(e) => { e.stopPropagation(); }}
+      >
+        {seat.occupied && seat.user ? (
+          <>
+            {/* Elegant User Profile Card Header */}
+            <div className="flex items-center gap-3 pb-2 border-b border-zinc-800/60 text-left">
+              <div className="relative">
+                <img 
+                  src={seat.user.avatar || `https://i.pravatar.cc/100?u=${seat.user.name}`} 
+                  alt={seat.user.name} 
+                  className="w-10 h-10 rounded-full border border-amber-400/20 object-cover"
+                />
+                <div className="absolute -bottom-0.5 -right-0.5 bg-zinc-900 border border-zinc-800 px-1 py-0.2 rounded-full text-[6px] font-black text-amber-400 scale-90">
+                  Lvl {simulatedLevel}
+                </div>
+              </div>
+              <div className="flex-1 min-w-0 flex flex-col items-start align-top">
+                <div className="flex items-center gap-1 justify-start">
+                  <span className="font-black text-zinc-100 text-xs truncate uppercase tracking-tight block max-w-[100px]" title={seat.user.name}>
+                    {seat.user.name}
+                  </span>
+                  {seat.user.name === room.host && (
+                    <span className="bg-red-500/10 text-red-400 border border-red-500/20 text-[7px] font-bold uppercase px-1 rounded scale-90 flex-shrink-0">
+                      Host
+                    </span>
+                  )}
+                </div>
+                <p className="text-zinc-500 text-[8px] font-bold tracking-wider uppercase mt-0.5 text-left">
+                  {simulatedFollowers} FOLLOWERS • SPEAKER
+                </p>
               </div>
             </div>
-          )}
-        </>
-      )}
-    </motion.div>
-  );
+
+            {seat.user.name === room.host && (
+              <div className="bg-zinc-900/40 border border-zinc-900/60 rounded-xl p-2.5 space-y-1.5 text-left">
+                <div className="flex items-center justify-between text-[7px] font-black uppercase tracking-wider text-zinc-400">
+                  <span className="flex items-center gap-1">
+                    <TrendingUp className="w-2.5 h-2.5 text-amber-400" />
+                    Agency Performance
+                  </span>
+                  <span className="text-amber-400 font-bold">
+                    {hostProfileDetail?.performance ?? 82}%
+                  </span>
+                </div>
+                <div className="relative w-full h-1.5 bg-zinc-900 border border-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    style={{ width: `${hostProfileDetail?.performance ?? 82}%` }}
+                    className="h-full bg-gradient-to-r from-amber-500 to-amber-300 rounded-full"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Speaking Status Indicators */}
+            <div className="flex items-center justify-between text-[8px] font-bold text-zinc-400 uppercase tracking-widest pl-1">
+              <span className="flex items-center gap-1.5 justify-start">
+                {seat.user.isMuted ? (
+                  <>
+                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />
+                    <span>Muted</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                    <span className="text-green-405">Speaking</span>
+                  </>
+                )}
+              </span>
+              {seat.user.voiceEffect && seat.user.voiceEffect !== 'none' && (
+                <span className="text-purple-400 flex items-center gap-0.5 justify-end">
+                  <Wand2 className="w-2.5 h-2.5" />
+                  {seat.user.voiceEffect}
+                </span>
+              )}
+            </div>
+
+            {/* Quick Action Options */}
+            {!isMySeat ? (
+              isHost ? (
+                /* HOST MODERATION CONTROLS */
+                <div className="space-y-2 text-left">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {/* Toggle Mute */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        muteUser(seat.user.name);
+                      }}
+                      className={cn(
+                        "w-full py-2 font-black uppercase text-[8px] tracking-wider rounded-xl flex items-center justify-center gap-1.5 transition-all border cursor-pointer",
+                        seat.user.isMuted
+                          ? "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20"
+                          : "bg-zinc-900 text-zinc-350 border-zinc-800 hover:bg-zinc-850 hover:text-white"
+                      )}
+                    >
+                      {seat.user.isMuted ? (
+                        <>
+                          <Mic className="w-3 h-3 text-red-400" />
+                          Unmute
+                        </>
+                      ) : (
+                        <>
+                          <MicOff className="w-3 h-3 text-zinc-400" />
+                          Mute
+                        </>
+                      )}
+                    </button>
+
+                    {/* Kick from Seat */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        kickUser(seat.user.name);
+                        setActiveSeatInfoId(null);
+                      }}
+                      className="w-full bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 py-2 py-2 font-black uppercase text-[8px] tracking-wider rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Kick Seat
+                    </button>
+                  </div>
+
+                  {/* Ban from Room */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      banUser(seat.user.name);
+                      setActiveSeatInfoId(null);
+                    }}
+                    className="w-full bg-red-650 text-white hover:bg-red-600 border border-red-700/30 py-2 font-black uppercase text-[8px] tracking-widest rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Slash className="w-2.5 h-2.5 text-white/90" />
+                    Ban from Room
+                  </button>
+
+                  {/* Advance to Full Moderation */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onModerate();
+                    }}
+                    className="w-full bg-zinc-850 border border-zinc-850 hover:bg-zinc-800 py-1.5 text-zinc-350 hover:text-white text-[8px] font-black uppercase tracking-widest rounded-xl text-center cursor-pointer"
+                  >
+                    Open Admin Console
+                  </button>
+                </div>
+              ) : (
+                /* GUEST BLOCK & FOLLOW CONTROLS */
+                <div className="space-y-2 text-left">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {/* Follow/Unfollow Toggle */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFollow(seat.user.name);
+                      }}
+                      className={cn(
+                        "w-full py-2.5 font-black uppercase text-[8px] tracking-wider rounded-xl flex items-center justify-center gap-1.5 transition-all border cursor-pointer",
+                        isFollowed
+                          ? "border-amber-400/30 text-amber-400 bg-amber-400/5 hover:bg-amber-400/10"
+                          : "bg-amber-400 text-black border-amber-400 hover:bg-amber-300 shadow-md shadow-amber-400/5"
+                      )}
+                    >
+                      <Star className={cn("w-3 h-3", isFollowed ? "fill-amber-400" : "fill-transparent")} />
+                      {isFollowed ? 'Following' : 'Follow'}
+                    </button>
+
+                    {/* Block/Unblock Toggle */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleBlock(seat.user.name);
+                      }}
+                      className={cn(
+                        "w-full py-2.5 font-black uppercase text-[8px] tracking-wider rounded-xl flex items-center justify-center gap-1.5 transition-all border cursor-pointer",
+                        isBlocked
+                          ? "border-red-500/30 text-red-450 bg-red-500/5 hover:bg-red-500/10"
+                          : "bg-zinc-900 text-zinc-350 border-zinc-800 hover:bg-zinc-850 hover:text-white"
+                      )}
+                    >
+                      <Lock className="w-3 h-3" />
+                      {isBlocked ? 'Blocked' : 'Block'}
+                    </button>
+                  </div>
+
+                  {/* Direct DM trigger */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDirectMessageTarget(seat.user.name);
+                      setActiveSeatInfoId(null);
+                    }}
+                    className="w-full bg-zinc-900 border border-dashed border-zinc-700 hover:border-zinc-500 text-zinc-300 hover:text-white py-2 font-black uppercase text-[8px] tracking-widest rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <MessageSquare className="w-3 h-3 text-amber-400" />
+                    Direct Message
+                  </button>
+                </div>
+              )
+            ) : (
+              /* ACTIVE USER'S OWN CONTROLS (Leave) */
+              <div className="space-y-2 text-center">
+                <p className="text-zinc-500 font-bold uppercase tracking-widest text-[7px] text-center">You occupy this seat</p>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLeaveSeat();
+                    setActiveSeatInfoId(null);
+                  }}
+                  className="w-full bg-red-500/15 text-red-500 border border-red-500/30 py-2.5 font-black uppercase text-[8px] tracking-widest rounded-xl hover:bg-red-550 hover:text-white transition-all duration-200 cursor-pointer"
+                >
+                  Leave Seat
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-zinc-500 font-bold uppercase tracking-widest text-[8px]">Empty Seat {seat.id + 1}</p>
+        )}
+      </motion.div>
+    );
+  };
 
   return (
     <motion.div 
@@ -794,10 +1487,150 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
       </div>
 
       {/* Room Header */}
-      <div className="p-6 flex items-center justify-between border-b border-zinc-900/50 bg-black/40 backdrop-blur-md">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl overflow-hidden border-2 border-amber-400/50 shadow-lg shadow-amber-400/10">
-            <img src={`https://i.pravatar.cc/150?u=${room.host}`} alt={room.host} />
+      <div className="p-6 flex items-center justify-between border-b border-zinc-900/50 bg-black/40 backdrop-blur-md relative">
+        <div className="flex items-center gap-4 relative">
+          <div className="relative">
+            <button 
+              type="button"
+              onClick={() => setShowHostCard(!showHostCard)}
+              className="w-12 h-12 rounded-2xl overflow-hidden border-2 border-amber-400/50 shadow-lg shadow-amber-400/10 hover:scale-105 hover:border-amber-400 transition-all duration-300 relative bg-zinc-900 flex-shrink-0 cursor-pointer"
+              title="Click to view Host Agency Performance rating"
+            >
+              <img src={`https://i.pravatar.cc/150?u=${room.host}`} alt={room.host} className="object-cover w-full h-full" />
+              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border border-zinc-950 rounded-full animate-pulse" />
+            </button>
+
+            {/* Floating Host Profile Card popover */}
+            <AnimatePresence>
+              {showHostCard && (
+                <>
+                  <div className="fixed inset-0 z-[140]" onClick={() => setShowHostCard(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 12, scale: 0.95 }}
+                    transition={{ type: "spring", damping: 25, stiffness: 350 }}
+                    className="absolute left-0 mt-3 w-80 bg-zinc-950 border border-zinc-800 backdrop-blur-xl rounded-[2rem] p-5 text-white shadow-2xl z-[150] flex flex-col space-y-4 text-left"
+                  >
+                    <div className="flex items-center gap-4 relative">
+                      <div className="relative">
+                        <img 
+                          src={`https://i.pravatar.cc/150?u=${room.host}`} 
+                          alt={room.host} 
+                          className="w-14 h-14 rounded-2xl border border-amber-400/20 object-cover shadow-md shadow-amber-400/5"
+                        />
+                        <div className="absolute -bottom-1 -right-1 bg-[#0d0d10] border border-zinc-800 px-1.5 py-0.5 rounded-full text-[6px] font-black tracking-widest text-amber-400 scale-90">
+                          LVL 12
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 justify-start">
+                          <span className="font-extrabold text-zinc-100 text-sm truncate uppercase tracking-tight" title={room.host}>
+                            {room.host}
+                          </span>
+                          <span className="bg-red-500/15 text-red-400 border border-red-500/25 text-[7px] font-black uppercase px-2 py-0.5 rounded-md scale-95 flex-shrink-0 tracking-wider">
+                            Host
+                          </span>
+                        </div>
+                        <p className="text-zinc-500 text-[8px] font-black tracking-widest uppercase mt-1">
+                          {hostProfileDetail?.category || 'PRO SOCIAL'} • ACTIVE STREAMER
+                        </p>
+                      </div>
+
+                      <button 
+                        onClick={() => setShowHostCard(false)}
+                        className="text-zinc-500 hover:text-white"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="bg-zinc-900/40 border border-zinc-900 w-full rounded-2xl p-3 text-[10px] text-zinc-400 leading-relaxed font-semibold italic">
+                      "{hostProfileDetail?.bio || 'Verified Host streamer. Join and support my active lounge nodes!'}"
+                    </div>
+
+                    {/* AGENCY PERFORMANCE PROGRESS BAR INDICATOR (Real Firestore Performance data representation) */}
+                    <div className="space-y-2 bg-gradient-to-r from-zinc-950 to-zinc-900 w-full rounded-2xl p-3.5 border border-zinc-900">
+                      <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-wider pl-0.5">
+                        <span className="text-zinc-400 flex items-center gap-1">
+                          <TrendingUp className="w-3 h-3 text-amber-400" />
+                          Agency Performance
+                        </span>
+                        <span className="text-amber-400 font-extrabold text-xs">
+                          {hostProfileDetail?.performance ?? 82}%
+                        </span>
+                      </div>
+
+                      <div className="relative w-full h-2.5 bg-zinc-900 border border-zinc-800 rounded-full overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${hostProfileDetail?.performance ?? 82}%` }}
+                          transition={{ duration: 1, ease: 'easeOut' }}
+                          className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 rounded-full"
+                        />
+                      </div>
+
+                      <div className="flex justify-between items-center pt-1">
+                        <span className="text-[7px] text-zinc-500 font-black tracking-widest uppercase">
+                          Rating: {(hostProfileDetail?.performance ?? 82) >= 90 ? 'ELITE S-TIER' : ((hostProfileDetail?.performance ?? 82) >= 80 ? 'PREMIUM GOLD' : 'ACTIVE PRO')}
+                        </span>
+                        <span className="text-[7px] text-zinc-500 font-black tracking-widest uppercase block text-right">
+                          Target: 100%
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[8px] font-black uppercase tracking-widest">
+                      <div className="bg-zinc-900/60 p-2 border border-zinc-800 rounded-xl flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-zinc-500 font-black leading-none">Security</p>
+                          <p className="text-zinc-300 font-bold leading-none mt-1">Verified</p>
+                        </div>
+                      </div>
+                      <div className="bg-zinc-900/60 p-2 border border-zinc-800 rounded-xl flex items-center gap-1.5">
+                        <Sparkle className="w-3.5 h-3.5 text-amber-400 shrink-0 select-none" />
+                        <div className="min-w-0">
+                          <p className="text-zinc-500 font-black leading-none">Status</p>
+                          <p className="text-zinc-300 font-bold leading-none mt-1">Leaderboard</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-zinc-900 pt-3 flex gap-2 w-full justify-between">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFollow(room.host);
+                        }}
+                        className={cn(
+                          "flex-1 py-1.5 font-black uppercase tracking-widest text-[8px] rounded-xl flex items-center justify-center gap-1 border cursor-pointer",
+                          followedUsers.includes(room.host)
+                            ? "border-amber-400/30 text-amber-400 bg-amber-400/5 hover:bg-amber-400/10"
+                            : "bg-amber-400 text-black border-amber-400 hover:bg-amber-300"
+                        )}
+                      >
+                        <Star className={cn("w-2.5 h-2.5", followedUsers.includes(room.host) ? "fill-amber-400 text-amber-400" : "fill-transparent")} />
+                        {followedUsers.includes(room.host) ? 'Following' : 'Follow'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDirectMessageTarget(room.host);
+                          setShowHostCard(false);
+                        }}
+                        className="flex-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-350 py-1.5 font-black uppercase tracking-widest text-[8px] rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <MessageSquare className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                        Chat Message
+                      </button>
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </div>
           <div>
             <h2 className="text-white font-black uppercase tracking-tight text-sm flex items-center gap-2">
@@ -805,7 +1638,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
               {room.type === 'video' && <Video className="w-3 h-3 text-blue-400" />}
               {isPrivate && <Lock className="w-3 h-3 text-amber-400" />}
             </h2>
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-[10px] text-zinc-500 font-black uppercase tracking-widest flex items-center gap-1.5">
                 Host: @{room.host}
                 {room.tier === 'Gold Agency' && (
@@ -825,11 +1658,54 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                 <div className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
                 <span className="text-[10px] text-amber-400 font-black font-mono">{formatTime(timeLeft)}</span>
               </div>
+              
+              {/* Agency Performance Badge directly on Host profile card / Room structure */}
+              <div className="w-1 h-1 bg-zinc-700 rounded-full" />
+              <button
+                type="button"
+                onClick={() => setShowHostCard(!showHostCard)}
+                className="text-[8px] font-black text-amber-400 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded-md flex items-center gap-1 hover:bg-amber-400/20 active:scale-95 transition-all select-none cursor-pointer"
+                title="Click to view Host Agency Performance rating"
+              >
+                <TrendingUp className="w-2.5 h-2.5 shrink-0 text-amber-400" />
+                PERF: {hostProfileDetail?.performance ?? 82}%
+              </button>
+
+              {broadcastBgm && broadcastBgm.isPlaying && (
+                <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-md text-[8px] uppercase font-black tracking-widest animate-pulse max-w-[260px] truncate select-none">
+                  <Music className="w-2.5 h-2.5 text-emerald-400 animate-bounce shrink-0" />
+                  <span className="truncate">Synced: {broadcastBgm.title}</span>
+                </div>
+              )}
             </div>
+            {roomDescription && (
+              <div className="mt-3 max-w-lg bg-zinc-950/40 border border-zinc-900/60 rounded-xl px-4 py-2 text-xs text-zinc-300 leading-relaxed italic relative">
+                <span className="absolute -top-2 left-3 bg-[#0a0a0c] px-1.5 text-[8px] font-black uppercase tracking-widest text-zinc-500 border border-zinc-900/40 rounded-full select-none">About Room</span>
+                <p className="mt-1 line-clamp-2 md:line-clamp-none font-medium">
+                  {roomDescription}
+                </p>
+              </div>
+            )}
           </div>
         </div>
         
         <div className="flex gap-2">
+          {/* Sit & Earn Button */}
+          <button 
+            type="button"
+            onClick={() => setShowSitEarnPanel(true)}
+            className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-2.5 rounded-xl hover:scale-105 transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 px-4 border border-indigo-500/30 relative"
+          >
+            <Coins className="w-5 h-5 text-amber-300 animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block">Sit & Earn</span>
+            {isUserSitting && (
+              <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+              </span>
+            )}
+          </button>
+
           {isHost && (
             <button 
               onClick={() => setShowHostConsole(true)}
@@ -952,19 +1828,42 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                   transition={{ duration: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
                   onClick={() => handleSeatClick(seat)}
                   className={cn(
-                    "aspect-square rounded-2xl flex flex-col items-center justify-center gap-1 transition-all border relative cursor-pointer overflow-hidden",
+                    "aspect-square rounded-2xl flex flex-col items-center justify-center gap-1 transition-all border relative cursor-pointer overflow-hidden group",
                     seat.occupied 
-                      ? "bg-zinc-900 border-zinc-800" 
-                      : "bg-zinc-950 border-zinc-900 border-dashed hover:border-zinc-700",
+                      ? (seat.isLocked ? "bg-red-950/10 border-red-900/50" : "bg-zinc-900 border-zinc-800")
+                      : (seat.isLocked ? "bg-red-950/10 border-red-900/30 border-dashed" : "bg-zinc-950 border-zinc-900 border-dashed hover:border-zinc-700"),
                     seat.user && blockedUsers.includes(seat.user.name) && "opacity-40 grayscale",
                     requestedSeats.some(r => r.seatId === seat.id) && "border-amber-400/50 bg-amber-400/5"
                   )}
                 >
                   <AnimatePresence>
                     {activeSeatInfoId === seat.id && (
-                      <SeatOverlay seat={seat} onModerate={() => openModeration(seat)} />
+                      <SeatOverlay seat={seat} onModerate={() => openModeration(seat)} onLeaveSeat={leaveSeat} />
                     )}
                   </AnimatePresence>
+                  
+                  {isHost ? (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLockSeat(seat.id);
+                      }}
+                      className={cn(
+                        "absolute top-1.5 right-1.5 z-[40] p-1.5 flex items-center justify-center rounded-xl bg-black/60 shadow-lg border backdrop-blur-md transition-all sm:opacity-0 sm:group-hover:opacity-100",
+                        seat.isLocked ? "border-red-500/50 sm:hover:bg-red-500/20 opacity-100" : "border-zinc-800 sm:hover:bg-zinc-800/80"
+                      )}
+                      title={seat.isLocked ? "Unlock Seat" : "Lock Seat"}
+                    >
+                      {seat.isLocked ? <Unlock className="w-3 h-3 text-red-500" /> : <Lock className="w-3 h-3 text-zinc-400" />}
+                    </button>
+                  ) : (
+                    seat.isLocked && (
+                      <div className="absolute top-1.5 right-1.5 z-[30] p-1.5 flex items-center justify-center rounded-xl bg-black/60 shadow-lg border border-red-500/50 backdrop-blur-md">
+                        <Lock className="w-3 h-3 text-red-500" />
+                      </div>
+                    )
+                  )}
+
                   {seat.occupied ? (
                     <>
                       <AnimatePresence>
@@ -981,7 +1880,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                           </motion.div>
                         )}
                       </AnimatePresence>
-                      <div className="relative w-full h-full flex items-center justify-center p-1 z-10">
+                      <div className="relative w-full h-full flex items-center justify-center p-1 z-10 block transition-transform group-hover:scale-95">
                         {seat.user?.videoEnabled ? (
                           <div className="w-full h-full rounded-xl overflow-hidden bg-black">
                             <img 
@@ -1006,12 +1905,12 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                         ) : null}
   
                         {blockedUsers.includes(seat.user?.name || '') ? (
-                          <div className="absolute top-1 right-1 bg-red-500 w-4 h-4 rounded-full border-2 border-black flex items-center justify-center">
+                          <div className="absolute top-1 right-1 bg-red-500 w-4 h-4 rounded-full border-2 border-black flex items-center justify-center z-20">
                             <Slash className="w-2 h-2 text-white" />
                           </div>
                         ) : (
                           <div className={cn(
-                            "absolute bottom-0 right-0 w-6 h-6 rounded-full border-2 border-black flex items-center justify-center shadow-md",
+                            "absolute bottom-0 right-0 w-6 h-6 rounded-full border-2 border-black flex items-center justify-center shadow-md z-20",
                             seat.user?.isMuted ? "bg-red-500" : (seat.user?.videoEnabled ? "bg-green-500" : "bg-amber-400")
                           )}>
                             {seat.user?.isMuted ? (
@@ -1022,32 +1921,118 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                           </div>
                         )}
                       </div>
-                      <span className="absolute bottom-1 text-[7px] font-black text-white/50 uppercase truncate px-1 bg-black/40 backdrop-blur-md rounded-full">
+                      <span className="absolute bottom-1 text-[7px] font-black text-white/50 uppercase truncate px-1 bg-black/40 backdrop-blur-md rounded-full z-20">
                         {seat.user?.name}
                       </span>
+                      {isHost && (
+                        <div className="absolute inset-0 bg-black/95 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center z-[25] rounded-2xl backdrop-blur-md border border-amber-400/40 gap-2 p-2 pointer-events-auto">
+                          <span className="text-[8px] font-black uppercase text-amber-400 tracking-widest">
+                            {seat.user.name === room.host ? "Host Seat" : "Moderate Seat"}
+                          </span>
+                          <div className="flex gap-2">
+                            {/* Mute Button */}
+                            <button
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                muteUser(seat.user.name); 
+                              }}
+                              className="w-8 h-8 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700 flex items-center justify-center transition-all active:scale-95 shadow-md"
+                              title={seat.user.isMuted ? "Unmute" : "Mute"}
+                            >
+                              {seat.user.isMuted ? (
+                                <Mic className="w-3.5 h-3.5 text-green-400 animate-pulse" />
+                              ) : (
+                                <MicOff className="w-3.5 h-3.5 text-red-500" />
+                              )}
+                            </button>
+
+                            {/* Leave or Kick Button */}
+                            {seat.user.name === room.host ? (
+                              <button
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  leaveSeat(); 
+                                }}
+                                className="w-8 h-8 rounded-xl bg-red-950/20 border border-red-500/30 hover:bg-red-900/40 hover:border-red-500/50 flex items-center justify-center transition-all active:scale-95 shadow-md"
+                                title="Leave Seat"
+                              >
+                                <X className="w-4 h-4 text-red-500" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  kickUser(seat.user.name); 
+                                }}
+                                className="w-8 h-8 rounded-xl bg-red-950/20 border border-red-500/30 hover:bg-red-900/40 hover:border-red-500/50 flex items-center justify-center transition-all active:scale-95 shadow-md"
+                                title="Kick User"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                              </button>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              openModeration(seat); 
+                            }}
+                            className="text-[8px] font-black text-amber-400 bg-amber-400/10 px-3 py-1.5 rounded-lg uppercase tracking-wider hover:bg-amber-400/20 transition-colors border border-amber-400/20 active:scale-95 shadow-sm"
+                          >
+                            Settings Panel
+                          </button>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <>
-                      <div className={cn(
-                        "w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all",
-                        seat.isLocked
-                          ? "border-red-500/50 bg-red-500/10 text-red-500"
-                          : requestedSeats.some(r => r.seatId === seat.id) 
-                            ? "border-amber-400 bg-amber-400/20 text-amber-400 rotate-12" 
-                            : "border-zinc-800/50 text-zinc-800"
-                      )}>
-                        {seat.isLocked ? <Lock className="w-4 h-4" /> : (requestedSeats.some(r => r.seatId === seat.id) ? <Send className="w-4 h-4" /> : <Star className="w-4 h-4" />)}
-                      </div>
+                      {/* Visual representations of non-occupied states (Locked or with/without Pending Requests) */}
                       {seat.isLocked ? (
-                         <span className="text-[6px] font-black text-red-500 uppercase tracking-tighter">
-                           Locked
-                         </span>
-                      ) : (
-                        requestedSeats.some(r => r.seatId === seat.id) && (
-                          <span className="text-[6px] font-black text-amber-500 uppercase tracking-tighter animate-pulse">
-                            Request Sent
+                        <div className="absolute inset-0 bg-gradient-to-b from-red-950/20 to-red-950/5 flex flex-col items-center justify-center pointer-events-none p-2 select-none">
+                          <div className="relative mb-1">
+                            <div className="absolute inset-0 bg-red-500/20 blur-md rounded-full" />
+                            <Lock className="w-5 h-5 text-red-500 relative z-10 animate-pulse" />
+                          </div>
+                          <span className="text-[7px] font-black text-red-500 uppercase tracking-[0.25em] text-center opacity-90 drop-shadow">
+                            Locked Seat
                           </span>
-                        )
+                        </div>
+                      ) : (
+                        <>
+                          {requestedSeats.some(r => r.seatId === seat.id) ? (
+                            <div className="absolute inset-0 bg-gradient-to-b from-amber-400/[0.08] to-transparent flex flex-col items-center justify-center pointer-events-none p-2 select-none">
+                              <div className="relative mb-2">
+                                <div className="absolute inset-x-0 mx-auto w-8 h-8 rounded-full bg-amber-400/20 animate-ping" />
+                                <div className="w-8 h-8 rounded-full bg-amber-400/10 border border-amber-400/40 flex items-center justify-center text-amber-400 relative z-10 shadow-lg shadow-amber-400/10">
+                                  {requestedSeats.some(r => r.seatId === seat.id && r.userName === currentUserDisplayName) ? (
+                                    <Send className="w-3.5 h-3.5 animate-pulse" />
+                                  ) : (
+                                    <Users className="w-3.5 h-3.5" />
+                                  )}
+                                </div>
+                              </div>
+                              <span className="text-[7px] font-black text-amber-400 uppercase tracking-[0.18em] animate-pulse text-center">
+                                {requestedSeats.some(r => r.seatId === seat.id && r.userName === currentUserDisplayName) ? (
+                                  "Request Sent"
+                                ) : (
+                                  `${requestedSeats.filter(r => r.seatId === seat.id).length} Requested`
+                                )}
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              <div className={cn(
+                                "w-8 h-8 rounded-full border border-dashed flex items-center justify-center transition-all group-hover:scale-110",
+                                "border-zinc-800 text-zinc-600 group-hover:border-zinc-500 group-hover:text-zinc-400 group-hover:rotate-45"
+                              )}>
+                                <Star className="w-4 h-4 transition-transform group-hover:scale-95" />
+                              </div>
+                              <span className="text-[6px] font-black text-zinc-600 uppercase tracking-widest mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                Join Seat
+                              </span>
+                            </>
+                          )}
+                        </>
                       )}
                     </>
                   )}
@@ -1210,6 +2195,205 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
         </div>
       </div>
 
+      {/* Sit & Earn Modal Overlay */}
+      <AnimatePresence>
+        {showSitEarnPanel && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowSitEarnPanel(false)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md z-[150]"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="fixed inset-0 flex items-center justify-center p-6 z-[160] pointer-events-none"
+            >
+              <div className="bg-zinc-950 border border-zinc-900 rounded-[3rem] w-full max-w-lg overflow-hidden pointer-events-auto shadow-2xl relative">
+                <button
+                  type="button"
+                  onClick={() => setShowSitEarnPanel(false)}
+                  className="absolute top-6 right-6 bg-zinc-900 p-2 rounded-xl text-zinc-400 hover:text-white transition-all z-10 border border-zinc-850"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="p-8">
+                  {/* Title Header */}
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-12 h-12 bg-purple-500/10 rounded-2xl flex items-center justify-center border border-purple-500/20 shadow-lg shadow-purple-500/5">
+                      <Coins className="w-6 h-6 text-amber-300 pointer-events-none" />
+                    </div>
+                    <div className="text-left">
+                      <h2 className="text-2xl font-black text-white italic uppercase tracking-tight flex items-center gap-2">
+                        Barca Sit & Earn
+                        <Sparkles className="w-4 h-4 text-amber-400" />
+                      </h2>
+                      <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest text-left">Sit down on a seat to start earning</p>
+                    </div>
+                  </div>
+
+                  {/* Sitting Status Alert Banner */}
+                  <div className={cn(
+                    "p-4 rounded-2xl border text-[10px] font-bold uppercase tracking-widest flex items-center gap-3 mb-6",
+                    isUserSitting 
+                      ? "bg-green-500/5 border-green-500/20 text-green-400" 
+                      : "bg-amber-500/5 border-amber-500/20 text-amber-400"
+                  )}>
+                    <div className={cn(
+                      "w-2.5 h-2.5 rounded-full flex-shrink-0",
+                      isUserSitting ? "bg-green-500 animate-pulse" : "bg-amber-500"
+                    )} />
+                    <span className="text-left leading-relaxed">
+                      {isUserSitting 
+                        ? "Active earning: Sitting on a seat 🟢" 
+                        : "Inactive: Find an empty seat and sit down to start counting progress ⚪"}
+                    </span>
+                  </div>
+
+                  {/* Dynamic Registration Status Banner */}
+                  <div className="p-4 rounded-2xl border border-zinc-900 bg-zinc-900/40 space-y-1 mb-6 text-left">
+                    <div className="flex items-center gap-2">
+                      <Trophy className={cn("w-4 h-4", isNewUser ? "text-amber-400" : "text-blue-400")} />
+                      <span className={cn(
+                        "text-[10px] font-black uppercase tracking-wider",
+                        isNewUser ? "text-amber-400" : "text-blue-400"
+                      )}>
+                        {isNewUser ? "⚡ New User Eligibility" : "⭐ Established User"}
+                      </span>
+                    </div>
+                    <p className="text-zinc-500 text-[9px] font-medium leading-relaxed uppercase">
+                      {isNewUser 
+                        ? "Registered within 8 days. Daily rewards have a pool of 20,000,000 (20k) coins maximum per day." 
+                        : "Registered 8+ days ago. Daily rewards have a pool of 10,000,000 (10k) coins maximum per day, earned without limit forever!"}
+                    </p>
+                  </div>
+
+                  {/* Timer Progress Block */}
+                  <div className="space-y-3 bg-black/40 border border-zinc-900 rounded-[2rem] p-6 mb-6">
+                    <div className="flex justify-between items-end">
+                      <div className="space-y-1 text-left">
+                        <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Today's Sitting Time</span>
+                        <div className="text-2xl font-black font-mono text-white tracking-wider">
+                          {Math.floor(localDuration / 3600).toString().padStart(2, '0')}h{' '}
+                          {Math.floor((localDuration % 3600) / 60).toString().padStart(2, '0')}m{' '}
+                          {(localDuration % 60).toString().padStart(2, '0')}s
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Goal Milestone</span>
+                        <span className="text-xs font-black text-amber-400 font-mono">2h 00m 00s</span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="space-y-1">
+                      <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden border border-zinc-850">
+                        <motion.div 
+                          className="h-full bg-gradient-to-r from-purple-500 via-indigo-500 to-amber-400"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.min(100, (localDuration / 7200) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[8px] font-black text-zinc-600 uppercase tracking-widest">
+                        <span>Started</span>
+                        <span>1 Hour (Half)</span>
+                        <span>2 Hours (Full)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Milestones Cards */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* milestone 1 */}
+                    <div className={cn(
+                      "p-5 rounded-3xl border flex flex-col justify-between h-40 transition-all text-left",
+                      localDuration >= 3600 
+                        ? "bg-purple-500/5 border-purple-500/20" 
+                        : "bg-zinc-900/10 border-zinc-900/50 opacity-60"
+                    )}>
+                      <div>
+                        <div className="flex items-center gap-1 text-purple-400 bg-purple-500/10 border border-purple-500/20 rounded-lg px-2 py-0.5 w-max mb-3">
+                          <Trophy className="w-3 h-3" />
+                          <span className="text-[8px] font-black uppercase tracking-widest">Half Task</span>
+                        </div>
+                        <h4 className="text-xs font-black text-white uppercase tracking-tight">60 Min Milestone</h4>
+                        <p className="text-[10px] text-amber-400 font-bold mt-1 font-mono flex items-center gap-1">
+                          <Coins className="w-3 h-3 text-amber-400" />
+                          +{isNewUser ? "10,000,000" : "5,000,000"}
+                        </p>
+                      </div>
+
+                      {sitEarnState.claimedHalf ? (
+                        <div className="bg-green-500/10 border border-green-500/20 text-green-400 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest text-center">
+                          Claimed ✓
+                        </div>
+                      ) : localDuration >= 3600 ? (
+                        <button
+                          type="button"
+                          onClick={() => claimSittingReward(true)}
+                          disabled={isClaimingReward !== null}
+                          className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white font-black py-3 rounded-2xl text-[9px] uppercase tracking-widest text-center hover:scale-[1.03] active:scale-[0.97] transition-all shadow-lg"
+                        >
+                          {isClaimingReward === 'half' ? "Claiming..." : "Claim Coins"}
+                        </button>
+                      ) : (
+                        <div className="bg-zinc-900 border border-zinc-800 text-zinc-500 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest text-center">
+                          {Math.floor(localDuration / 60)}/60 min lock
+                        </div>
+                      )}
+                    </div>
+
+                    {/* milestone 2 */}
+                    <div className={cn(
+                      "p-5 rounded-3xl border flex flex-col justify-between h-40 transition-all text-left",
+                      localDuration >= 7200 
+                        ? "bg-indigo-500/5 border-indigo-500/20" 
+                        : "bg-zinc-900/10 border-zinc-900/50 opacity-60"
+                    )}>
+                      <div>
+                        <div className="flex items-center gap-1 text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-2 py-0.5 w-max mb-3">
+                          <Trophy className="w-3 h-3" />
+                          <span className="text-[8px] font-black uppercase tracking-widest">Full Task</span>
+                        </div>
+                        <h4 className="text-xs font-black text-white uppercase tracking-tight">120 Min Milestone</h4>
+                        <p className="text-[10px] text-amber-400 font-bold mt-1 font-mono flex items-center gap-1">
+                          <Coins className="w-3 h-3 text-amber-400" />
+                          +{isNewUser ? "10,000,000" : "5,000,000"}
+                        </p>
+                      </div>
+
+                      {sitEarnState.claimedFull ? (
+                        <div className="bg-green-500/10 border border-green-500/20 text-green-400 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest text-center">
+                          Claimed ✓
+                        </div>
+                      ) : localDuration >= 7200 ? (
+                        <button
+                          type="button"
+                          onClick={() => claimSittingReward(false)}
+                          disabled={isClaimingReward !== null}
+                          className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white font-black py-3 rounded-2xl text-[9px] uppercase tracking-widest text-center hover:scale-[1.03] active:scale-[0.97] transition-all shadow-lg"
+                        >
+                          {isClaimingReward === 'full' ? "Claiming..." : "Claim Coins"}
+                        </button>
+                      ) : (
+                        <div className="bg-zinc-900 border border-zinc-800 text-zinc-500 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest text-center">
+                          {Math.floor(localDuration / 60)}/120 min lock
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Host Console Overlay */}
       <AnimatePresence>
         {showHostConsole && (
@@ -1245,6 +2429,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
               <div className="flex border-b border-zinc-900 bg-zinc-950/50">
                 {[
                   { id: 'broadcast', label: 'Broadcast', icon: Radio },
+                  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
                   { id: 'requests', label: 'Requests', icon: Bell },
                   { id: 'users', label: 'Participants', icon: Users },
                   { id: 'permissions', label: 'Moderation', icon: Shield },
@@ -1374,6 +2559,18 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                           </div>
                         </div>
                       </section>
+                    </motion.div>
+                  )}
+
+                  {activeConsoleTab === 'analytics' && (
+                    <motion.div
+                      key="analytics-tab"
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      className="space-y-12"
+                    >
+                      <RoomAnalytics roomTitle={room.id} />
                     </motion.div>
                   )}
 
@@ -1549,6 +2746,27 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                         <Slash className="w-3 h-3" />
                                         Ban
                                       </button>
+                                    </div>
+                                    <div className="space-y-2 bg-zinc-950 p-3 rounded-xl border border-zinc-800/50">
+                                      <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500">
+                                        <span>Voice Effect</span>
+                                        <span>{user.voiceEffect || 'None'}</span>
+                                      </div>
+                                      <div className="grid grid-cols-4 gap-1">
+                                        {['none', ...Object.keys(voiceSettings).filter(k => k !== 'none')].map(effectId => (
+                                          <button
+                                            key={effectId}
+                                            onClick={() => applyVoiceEffect(user.name, effectId)}
+                                            className={cn(
+                                              "text-[8px] p-1.5 rounded-md font-bold uppercase tracking-wider transition-all truncate",
+                                              (user.voiceEffect || 'none') === effectId ? "bg-purple-600 text-white shadow-md shadow-purple-500/20" : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+                                            )}
+                                            title={effectId}
+                                          >
+                                            {effectId === 'none' ? 'None' : effectId === 'robotic' ? 'Robot' : effectId}
+                                          </button>
+                                        ))}
+                                      </div>
                                     </div>
                                   </div>
                                 )}
@@ -1824,22 +3042,35 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                         <div className="flex items-center justify-between px-2">
                           <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Room Identity</h3>
                           <button 
-                            onClick={() => handleUpdateRoomSettings({ title: roomTitle })}
+                            onClick={() => handleUpdateRoomSettings({ title: roomTitle, description: roomDescription })}
                             className="text-[9px] font-black text-amber-400 uppercase tracking-widest hover:text-amber-300 transition-colors"
                           >
                             Sync Changes
                           </button>
                         </div>
                         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] space-y-6">
-                          <div className="space-y-2">
-                            <label className="text-zinc-500 text-[10px] font-black uppercase tracking-widest ml-1">Room Title</label>
-                            <div className="bg-zinc-950 border border-zinc-800 rounded-2xl px-1 py-1 flex items-center">
-                              <input 
-                                type="text" 
-                                value={roomTitle} 
-                                onChange={(e) => setRoomTitle(e.target.value)}
-                                className="w-full bg-transparent px-4 py-3 text-white text-xs font-bold outline-none"
-                              />
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <label className="text-zinc-500 text-[10px] font-black uppercase tracking-widest ml-1">Room Title</label>
+                              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl px-1 py-1 flex items-center">
+                                <input 
+                                  type="text" 
+                                  value={roomTitle} 
+                                  onChange={(e) => setRoomTitle(e.target.value)}
+                                  className="w-full bg-transparent px-4 py-3 text-white text-xs font-bold outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-zinc-500 text-[10px] font-black uppercase tracking-widest ml-1">Room Description (Optional)</label>
+                              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl px-1 py-1 flex items-center">
+                                <textarea
+                                  value={roomDescription}
+                                  onChange={(e) => setRoomDescription(e.target.value)}
+                                  placeholder="What's this room about?"
+                                  className="w-full bg-transparent px-4 py-3 text-white text-xs font-bold outline-none resize-none h-24"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1897,7 +3128,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                 handleUpdateRoomSettings({ 'settings.voiceFXEnabled': newVal });
                               }}
                               className={cn(
-                                "w-12 h-7 rounded-full relative transition-all duration-300 p-1",
+                                "w-12 h-7 rounded-full relative transition-all duration-300 p-1 shrink-0",
                                 voiceFXEnabled ? "bg-purple-500" : "bg-zinc-800"
                               )}
                             >
@@ -1907,12 +3138,164 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                               )} />
                             </button>
                           </div>
+
+                          <AnimatePresence>
+                            {voiceFXEnabled && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="pt-4 border-t border-zinc-800 space-y-6">
+                                  <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-2 px-2 scrollbar-none">
+                                    {Object.keys(voiceSettings).filter(k => k !== 'none').map(effect => (
+                                      <button
+                                        key={effect}
+                                        onClick={() => setSelectedEffectParamTab(effect)}
+                                        className={cn(
+                                          "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-colors",
+                                          selectedEffectParamTab === effect ? "bg-purple-500 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                                        )}
+                                      >
+                                        {effect}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  
+                                  <div className="space-y-4">
+                                    {['pitch', 'reverb', 'echo', 'clarity'].map(param => (
+                                      <div key={param} className="space-y-2 relative">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">{param}</span>
+                                          <span className="text-[10px] font-mono text-purple-400 font-bold">
+                                            {voiceSettings[selectedEffectParamTab]?.[param as keyof typeof voiceSettings['deep']] || 0}%
+                                          </span>
+                                        </div>
+                                        <input
+                                          type="range"
+                                          min="0"
+                                          max="100"
+                                          value={voiceSettings[selectedEffectParamTab]?.[param as keyof typeof voiceSettings['deep']] || 0}
+                                          onChange={(e) => {
+                                            setVoiceSettings(prev => ({
+                                              ...prev,
+                                              [selectedEffectParamTab]: {
+                                                ...prev[selectedEffectParamTab],
+                                                [param]: parseInt(e.target.value)
+                                              }
+                                            }))
+                                          }}
+                                          className="w-full relative z-10 appearance-none h-1.5 bg-zinc-800 rounded-full cursor-pointer accent-purple-500"
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {/* Custom Profiles & Actions for Host Console */}
+                                  <div className="pt-4 border-t border-zinc-800 space-y-4">
+                                    <div className="flex gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          try {
+                                            await handleUpdateRoomSettings({
+                                              'settings.voiceSettings': voiceSettings
+                                            });
+                                            alert(`Profile "${selectedEffectParamTab}" saved to server successfully!`);
+                                          } catch (err) {
+                                            console.error(err);
+                                          }
+                                        }}
+                                        className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-2xl transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98]"
+                                      >
+                                        Save All Changes
+                                      </button>
+
+                                      {!['deep', 'helium', 'robotic', 'ghost', 'echo'].includes(selectedEffectParamTab) && (
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            const confirmDel = confirm(`Are you sure you want to delete custom voice profile "${selectedEffectParamTab}"?`);
+                                            if (!confirmDel) return;
+                                            const copy = { ...voiceSettings };
+                                            delete copy[selectedEffectParamTab];
+                                            setVoiceSettings(copy);
+                                            setSelectedEffectParamTab('deep');
+                                            try {
+                                              await handleUpdateRoomSettings({
+                                                'settings.voiceSettings': copy
+                                              });
+                                            } catch (err) {
+                                              console.error(err);
+                                            }
+                                          }}
+                                          className="bg-red-500/10 hover:bg-red-500 border border-red-500/20 hover:border-red-500 text-red-500 hover:text-white text-[10px] font-black uppercase tracking-widest py-3 px-4 rounded-2xl transition-all active:scale-[0.98]"
+                                        >
+                                          Delete Profile
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    <div className="bg-black/30 border border-zinc-900 rounded-2xl p-4 space-y-3 text-left">
+                                      <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Create Custom Profile</p>
+                                      <div className="flex gap-2">
+                                        <input
+                                          type="text"
+                                          placeholder="e.g. Space Echo, Alien DJ"
+                                          value={customProfileName}
+                                          onChange={(e) => setCustomProfileName(e.target.value)}
+                                          className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-[11px] text-white placeholder-zinc-600 font-bold outline-none focus:border-purple-500 transition-colors"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            const trimmed = customProfileName.trim();
+                                            if (!trimmed) {
+                                              alert('Please enter a custom profile name!');
+                                              return;
+                                            }
+                                            if (voiceSettings[trimmed]) {
+                                              alert('A profile with this name already exists!');
+                                              return;
+                                            }
+
+                                            const currentParams = voiceSettings[selectedEffectParamTab] || { pitch: 50, reverb: 20, echo: 10, clarity: 80 };
+                                            const updatedSettings = {
+                                              ...voiceSettings,
+                                              [trimmed]: { ...currentParams }
+                                            };
+
+                                            setVoiceSettings(updatedSettings);
+                                            setSelectedEffectParamTab(trimmed);
+                                            setCustomProfileName('');
+
+                                            try {
+                                              await handleUpdateRoomSettings({
+                                                'settings.voiceSettings': updatedSettings
+                                              });
+                                              alert(`Custom profile "${trimmed}" created and saved!`);
+                                            } catch (err) {
+                                              console.error(err);
+                                            }
+                                          }}
+                                          className="bg-zinc-800 hover:bg-zinc-700 text-amber-400 text-[10px] font-bold uppercase tracking-wider px-4 py-2 rounded-xl border border-zinc-700 active:scale-[0.98] transition-all"
+                                        >
+                                          Save Profile
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       </section>
 
                       {/* Privacy & Fee */}
                       <section className="space-y-4">
-                        <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Privacy & Revenue</h3>
+                        <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em]">Privacy Settings</h3>
                         <div className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] p-6 space-y-6">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -1920,8 +3303,8 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                 {isPrivate ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                               </div>
                               <div>
-                                <p className="text-white font-bold text-xs uppercase tracking-tight">Private Room</p>
-                                <p className="text-zinc-500 text-[10px] font-medium uppercase">{isPrivate ? 'Paid Entry Active' : 'Free Entry for All'}</p>
+                                <p className="text-white font-bold text-xs uppercase tracking-tight">Room Privacy</p>
+                                <p className="text-zinc-500 text-[10px] font-medium uppercase">{isPrivate ? 'Private' : 'Public'}</p>
                               </div>
                             </div>
                             <button 
@@ -1985,7 +3368,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                                     </label>
                                     <div className="bg-zinc-950 border border-zinc-800 rounded-2xl px-1 py-1 flex items-center gap-2">
                                       <input 
-                                        type="text" 
+                                        type="password" 
                                         placeholder="Optional password..."
                                         value={roomPassword}
                                         onChange={(e) => setRoomPassword(e.target.value)}
@@ -2080,9 +3463,10 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
               className="fixed inset-0 bg-black/90 backdrop-blur-md z-[150] flex items-center justify-center p-6"
             >
               <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
+                initial={{ scale: 0.95, opacity: 0, y: 30 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 30 }}
+                transition={{ type: "spring", damping: 25, stiffness: 350 }}
                 onClick={(e) => e.stopPropagation()}
                 className="bg-zinc-950 border border-zinc-800 rounded-[3rem] w-full max-w-sm overflow-hidden shadow-2xl"
               >
@@ -2263,29 +3647,44 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                 {isHost && !selectedUserToModerate.isEmpty && (
                   <div className="p-6 border-t border-zinc-900 bg-zinc-900/10 space-y-4">
                     <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest text-center">Voice Effects</h4>
-                    <div className="grid grid-cols-6 gap-2">
-                      {[
-                        { id: 'none', icon: Mic, color: 'text-zinc-400' },
-                        { id: 'deep', icon: Volume1, color: 'text-blue-400' },
-                        { id: 'helium', icon: Sparkles, color: 'text-amber-400' },
-                        { id: 'robotic', icon: Bot, color: 'text-zinc-500' },
-                        { id: 'ghost', icon: Ghost, color: 'text-white' },
-                        { id: 'echo', icon: Music, color: 'text-purple-400' },
-                      ].map(fx => (
-                        <button
-                          key={fx.id}
-                          onClick={() => applyVoiceEffect(selectedUserToModerate.name, fx.id)}
-                          className={cn(
-                            "flex flex-col items-center justify-center p-2 rounded-xl transition-all",
-                            (selectedUserToModerate.voiceEffect || 'none') === fx.id 
-                              ? "bg-purple-600/20 shadow-inner" 
-                              : "hover:bg-zinc-800"
-                          )}
-                        >
-                          <fx.icon className={cn("w-4 h-4", (selectedUserToModerate.voiceEffect || 'none') === fx.id ? "text-purple-400" : fx.color)} />
-                          <span className="text-[6px] font-black uppercase tracking-widest mt-1 text-zinc-500">{fx.id}</span>
-                        </button>
-                      ))}
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {Object.keys(voiceSettings).map(id => {
+                        const iconMap: Record<string, any> = {
+                          none: Mic,
+                          deep: Volume1,
+                          helium: Sparkles,
+                          robotic: Bot,
+                          ghost: Ghost,
+                          echo: Music,
+                        };
+                        const colorMap: Record<string, string> = {
+                          none: 'text-zinc-400',
+                          deep: 'text-blue-400',
+                          helium: 'text-amber-400',
+                          robotic: 'text-zinc-500',
+                          ghost: 'text-white',
+                          echo: 'text-purple-400',
+                        };
+
+                        const IconCmp = iconMap[id] || Wand2;
+                        const iconColor = colorMap[id] || 'text-purple-400 animate-pulse';
+
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => applyVoiceEffect(selectedUserToModerate.name, id)}
+                            className={cn(
+                              "flex flex-col items-center justify-center p-2 rounded-xl transition-all border border-transparent",
+                              (selectedUserToModerate.voiceEffect || 'none') === id 
+                                ? "bg-purple-600/20 border-purple-500/40 shadow-inner" 
+                                : "hover:bg-zinc-800"
+                            )}
+                          >
+                            <IconCmp className={cn("w-4 h-4", (selectedUserToModerate.voiceEffect || 'none') === id ? "text-purple-400" : iconColor)} />
+                            <span className="text-[6.5px] font-black uppercase tracking-widest mt-1 text-zinc-500 truncate max-w-full" title={id}>{id}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2339,7 +3738,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-3 max-h-60 overflow-y-auto pr-1">
                   {[
                     { id: 'none', label: 'Original', icon: Mic, desc: 'Pure input', color: 'text-zinc-400' },
                     { id: 'deep', label: 'Deep', icon: Volume1, desc: 'Bass boost', color: 'text-blue-400' },
@@ -2347,6 +3746,15 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                     { id: 'robotic', label: 'Droid', icon: Bot, desc: 'Metallic freq', color: 'text-zinc-500' },
                     { id: 'ghost', label: 'Spectral', icon: Ghost, desc: 'Echo trails', color: 'text-white' },
                     { id: 'echo', label: 'Studio', icon: Music, desc: 'Reverb max', color: 'text-purple-400' },
+                    ...Object.keys(voiceSettings)
+                      .filter(k => !['none', 'deep', 'helium', 'robotic', 'ghost', 'echo'].includes(k))
+                      .map(key => ({
+                        id: key,
+                        label: key,
+                        icon: Wand2,
+                        desc: 'Custom FX',
+                        color: 'text-purple-400 animate-pulse'
+                      }))
                   ].map(fx => (
                     <button
                       key={fx.id}
@@ -2354,10 +3762,10 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                         setSelectedVoiceEffect(fx.id);
                       }}
                       className={cn(
-                        "flex flex-col items-center gap-2 p-4 rounded-3xl border transition-all group relative overflow-hidden",
+                        "flex flex-col items-center gap-2 p-3 sm:p-4 rounded-3xl border transition-all group relative overflow-hidden",
                         selectedVoiceEffect === fx.id 
                           ? "bg-purple-600 border-purple-400 text-white shadow-xl shadow-purple-500/40 scale-105 z-10" 
-                          : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:bg-zinc-800/50"
+                          : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:bg-zinc-800/10"
                       )}
                     >
                       {selectedVoiceEffect === fx.id && (
@@ -2370,8 +3778,8 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                         "w-5 h-5 transition-all duration-300 group-active:scale-90",
                         selectedVoiceEffect === fx.id ? "text-white scale-110" : fx.color
                       )} />
-                      <div className="text-center">
-                        <p className="text-[9px] font-black uppercase tracking-widest">{fx.label}</p>
+                      <div className="text-center w-full">
+                        <p className="text-[9px] font-black uppercase tracking-widest truncate">{fx.label}</p>
                         <p className={cn("text-[6px] font-bold uppercase tracking-tighter mt-0.5 opacity-60")}>{fx.desc}</p>
                       </div>
                     </button>
