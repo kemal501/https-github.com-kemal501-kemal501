@@ -654,11 +654,56 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
     
     const sendHeartbeat = async () => {
       try {
-        await fetch("/api/room/heartbeat", {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId })
-        });
+        const userRef = doc(db, 'users', userId);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) return;
+        
+        const data = userSnap.data();
+        const today = new Date().toISOString().split('T')[0];
+        
+        if (data.lastHeatbeatDate !== today) {
+           await updateDoc(userRef, {
+             minutesInRoomToday: 1,
+             lastHeatbeatDate: today
+           });
+        } else {
+           await updateDoc(userRef, {
+             minutesInRoomToday: increment(1)
+           });
+           
+           // Auto-complete the engagement task if they hit 60 mins today
+           if ((data.minutesInRoomToday || 0) + 1 >= 60) {
+             const completionRef = doc(db, `users/${userId}/task_completions/engagement`);
+             const completionSnap = await getDoc(completionRef);
+             
+             if (!completionSnap.exists()) {
+               const isNewUser = data.createdAt 
+                 ? (new Date().getTime() - data.createdAt.toDate().getTime()) < 8 * 24 * 60 * 60 * 1000 
+                 : false;
+               const rewardAmount = isNewUser ? 2000 : 1000;
+               
+               await setDoc(completionRef, {
+                 completedAt: serverTimestamp(),
+                 rewardClaimed: rewardAmount,
+                 autoCompleted: true
+               });
+               
+               await updateDoc(userRef, {
+                 coins: increment(rewardAmount)
+               });
+               
+               await addDoc(collection(db, "coin_transactions"), {
+                 type: "reward",
+                 targetUserId: userId,
+                 targetUserName: data.displayName || "Platform User",
+                 amount: rewardAmount,
+                 description: "Completed: Stay active in room for 1 hour. (Auto)",
+                 createdAt: new Date().toISOString(),
+                 status: 'completed'
+               });
+             }
+           }
+        }
       } catch (e) {
         console.error("Heartbeat failed", e);
       }

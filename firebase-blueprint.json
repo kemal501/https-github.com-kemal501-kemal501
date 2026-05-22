@@ -157,9 +157,28 @@
       "properties": {
         "followedAt": { "type": "string", "format": "date" }
       }
+    },
+    "RoleChangeAudit": {
+      "title": "Role Change Audit",
+      "description": "Log entry tracking who changed which user role and when.",
+      "type": "object",
+      "properties": {
+        "changedById": { "type": "string" },
+        "changedByName": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserName": { "type": "string" },
+        "oldRole": { "type": "string" },
+        "newRole": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["changedById", "changedByName", "targetUserId", "targetUserName", "oldRole", "newRole"]
     }
   },
   "firestore": {
+    "role_change_audits/{auditId}": {
+      "schema": "RoleChangeAudit",
+      "description": "Role change audit trails."
+    },
     "global_music/{musicId}": {
       "schema": "GlobalMusic",
       "description": "Interactive global room audio state and synchronisation."

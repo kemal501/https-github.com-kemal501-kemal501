@@ -9,10 +9,25 @@ service cloud.firestore {
     // Common helpers
     function isSignedIn() { return request.auth != null; }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
-    function getUserData() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function isAgent() { return isSignedIn() && getUserData().role == 'agent'; }
-    function isHost() { return isSignedIn() && getUserData().role == 'host'; }
+    function isAgent() {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'agent';
+    }
+    function isHost() {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'host';
+    }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'kemalziyad4@gmail.com' || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        )
+      );
+    }
 
     // User profiles
     match /users/{userId} {
@@ -25,14 +40,15 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'displayName', 'photoURL', 'bio', 'category', 'isFaceVerified', 
           'faceVerifiedAt', 'agencyId', 'role', 'following', 'coins', 
-          'paymentMethod', 'verificationRequest'
+          'paymentMethod', 'verificationRequest', 'minutesInRoomToday', 'lastHeatbeatDate',
+          'loginStreak', 'lastStreakClaimedDate'
         ])
       )) || (
         // Allow others to only increment the user's coins (for gifting)
         isSignedIn() && 
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins']) &&
         request.resource.data.coins > resource.data.coins
-      );
+      ) || isAdmin();
     }
 
     // Following lists
@@ -86,6 +102,12 @@ service cloud.firestore {
       allow create: if isOwner(userId);
     }
 
+    // Global Coin Transactions
+    match /coin_transactions/{transactionId} {
+      allow read: if isSignedIn() && (resource.data.targetUserId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn();
+    }
+
     // Transactions
     match /users/{userId}/transactions/{transactionId} {
       allow read: if isOwner(userId);
@@ -112,6 +134,13 @@ service cloud.firestore {
     match /global_music/{musicId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && isValidId(musicId);
+    }
+
+    // Role change audits
+    match /role_change_audits/{auditId} {
+      allow read: if isSignedIn() && isAdmin();
+      allow create: if isSignedIn() && isAdmin();
+      allow update, delete: if false;
     }
   }
 }

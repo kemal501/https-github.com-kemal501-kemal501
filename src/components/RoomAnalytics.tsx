@@ -47,13 +47,15 @@ export default function RoomAnalytics({ roomTitle }: { roomTitle: string }) {
   const [peakRetention, setPeakRetention] = React.useState(100);
   const [avgRetention, setAvgRetention] = React.useState(91.7);
 
+  const [timeRange, setTimeRange] = React.useState<'realtime' | '1h' | '24h' | '7d'>('realtime');
+
   // Live simulation tick interval
   React.useEffect(() => {
-    if (!isLiveUpdating) return;
+    if (!isLiveUpdating || timeRange !== 'realtime') return;
 
     const interval = setInterval(() => {
       setData((prev) => {
-        const lastPoint = prev[prev.length - 1];
+        const lastPoint = prev[prev.length - 1] || { time: '00:00', retention: 90, activeViewers: 10 };
         
         // Formulate real-time timestamp
         const now = new Date();
@@ -83,7 +85,57 @@ export default function RoomAnalytics({ roomTitle }: { roomTitle: string }) {
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [isLiveUpdating]);
+  }, [isLiveUpdating, timeRange]);
+
+  // Handle historical data generation
+  React.useEffect(() => {
+    if (timeRange === 'realtime') return;
+
+    // Generate historical data
+    let pointsCount = 0;
+    let labelFormatter = (i: number) => '';
+    
+    if (timeRange === '1h') {
+      pointsCount = 60;
+      labelFormatter = (i) => `-${60 - i}m`;
+    } else if (timeRange === '24h') {
+      pointsCount = 24;
+      labelFormatter = (i) => `-${24 - i}h`;
+    } else if (timeRange === '7d') {
+      pointsCount = 7;
+      labelFormatter = (i) => `Day ${i + 1}`;
+    }
+
+    const newData: Datapoint[] = [];
+    let currentRet = 80;
+    let currentViewers = 50;
+
+    for (let i = 0; i < pointsCount; i++) {
+        const jitter = (Math.random() - 0.5) * 15;
+        currentRet = Math.min(100, Math.max(40, Math.round(currentRet + jitter)));
+        
+        const viewerJitter = Math.floor((Math.random() - 0.5) * 30);
+        currentViewers = Math.max(10, currentViewers + viewerJitter);
+
+        newData.push({
+            time: labelFormatter(i),
+            retention: currentRet,
+            activeViewers: currentViewers
+        });
+    }
+
+    setData(newData);
+    
+    if (newData.length > 0) {
+        const peak = Math.max(...newData.map(p => p.retention));
+        const avg = Math.round((newData.reduce((sum, p) => sum + p.retention, 0) / newData.length) * 10) / 10;
+        
+        setCurrentRetention(newData[newData.length - 1].retention);
+        setPeakRetention(peak);
+        setAvgRetention(avg);
+    }
+  }, [timeRange]);
+
 
   const exportCSV = () => {
     try {
@@ -103,25 +155,48 @@ export default function RoomAnalytics({ roomTitle }: { roomTitle: string }) {
   return (
     <div className="space-y-6 text-left">
       {/* Header and Live Status */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-[10px] font-black text-zinc-650 uppercase tracking-[0.3em]">Real-time Watcher Retention</h3>
-          <p className="text-[8px] text-zinc-550 font-bold uppercase tracking-[0.15em] mt-1 italic">
-            Targeting organic interaction metrics & live sync drop-offs
-          </p>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-[10px] font-black text-zinc-650 uppercase tracking-[0.3em]">{timeRange === 'realtime' ? 'Real-time Watcher Retention' : 'Historical Watcher Retention'}</h3>
+            <p className="text-[8px] text-zinc-550 font-bold uppercase tracking-[0.15em] mt-1 italic">
+              Targeting organic interaction metrics & live sync drop-offs
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {timeRange === 'realtime' && (
+              isLiveUpdating ? (
+                <span className="flex items-center gap-1.5 bg-amber-400/10 border border-amber-400/20 text-amber-400 text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider select-none animate-pulse-slow">
+                  <span className="w-1.5 h-1.5 bg-amber-400 rounded-full" />
+                  TICK ACTIVE
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 text-zinc-500 text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider select-none">
+                  <span className="w-1.5 h-1.5 bg-zinc-600 rounded-full" />
+                  PAUSED
+                </span>
+              )
+            )}
+            {timeRange !== 'realtime' && (
+                <span className="flex items-center gap-1.5 bg-blue-400/10 border border-blue-400/20 text-blue-400 text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider select-none">
+                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                  HISTORICAL
+                </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {isLiveUpdating ? (
-            <span className="flex items-center gap-1.5 bg-amber-400/10 border border-amber-400/20 text-amber-400 text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider select-none animate-pulse-slow">
-              <span className="w-1.5 h-1.5 bg-amber-400 rounded-full" />
-              TICK ACTIVE
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 text-zinc-500 text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider select-none">
-              <span className="w-1.5 h-1.5 bg-zinc-600 rounded-full" />
-              PAUSED
-            </span>
-          )}
+        
+        {/* Date Range Picker */}
+        <div className="flex bg-zinc-950/80 p-1 rounded-xl self-start border border-zinc-800/80">
+           {(['realtime', '1h', '24h', '7d'] as const).map((tr) => (
+             <button
+                key={tr}
+                onClick={() => setTimeRange(tr)}
+                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${timeRange === tr ? 'bg-amber-400 text-black shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900'}`}
+             >
+                {tr === 'realtime' ? 'Live 60s' : tr}
+             </button>
+           ))}
         </div>
       </div>
 
@@ -218,6 +293,9 @@ export default function RoomAnalytics({ roomTitle }: { roomTitle: string }) {
                 strokeWidth={2.5}
                 dot={{ r: 2.5, strokeWidth: 1.5, fill: '#000', stroke: chartStrokeColor }}
                 activeDot={{ r: 5 }}
+                isAnimationActive={true}
+                animationDuration={1200}
+                animationEasing="ease-in-out"
               />
             </LineChart>
           </ResponsiveContainer>

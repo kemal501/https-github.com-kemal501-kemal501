@@ -82,7 +82,10 @@ const RoomCard = ({ title, host, viewers, type, onJoin, onShowProfile }: { key?:
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
       
       <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-1.5 justify-start items-center">
-        <div className="bg-red-600/90 backdrop-blur-md px-2 py-0.5 rounded-lg flex items-center gap-1 shrink-0">
+        <div 
+          className="bg-red-600/90 backdrop-blur-md px-2 py-0.5 rounded-lg flex items-center gap-1 shrink-0"
+          title="The host is actively broadcasting in this room right now."
+        >
           <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
           <span className="text-white text-[10px] font-black uppercase tracking-tighter">Live</span>
         </div>

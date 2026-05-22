@@ -7,11 +7,14 @@ import React from 'react';
 import { 
   Shield, Zap, RefreshCw, Users, Terminal, Database, 
   Search, UserCog, Coins, ShoppingBag, ArrowRightLeft, 
-  Loader2, History, Check, AlertCircle, TrendingUp
+  Loader2, History, Check, AlertCircle, TrendingUp, BarChart3, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import RoomAnalytics from './RoomAnalytics';
+import NetworkQualityDashboard from './NetworkQualityDashboard';
+import ResellerCoinSystem from './ResellerCoinSystem';
 
 // Module-level cache to prevent rapid API polling / rate limit issues
 let cachedUsers: any[] | null = null;
@@ -27,17 +30,22 @@ export default function AdminPanel() {
   
   // App views and role simulation states
   const [simulatedRole, setSimulatedRole] = React.useState<'admin' | 'seller' | 'user'>('admin');
-  const [activeTab, setActiveTab] = React.useState<'admin' | 'seller'>('admin');
+  const [activeTab, setActiveTab] = React.useState<'admin' | 'seller' | 'network' | 'reseller_system'>('admin');
 
   // Directory & ledgers
   const [users, setUsers] = React.useState<any[]>([]);
   const [transactions, setTransactions] = React.useState<any[]>([]);
+  const [audits, setAudits] = React.useState<any[]>([]);
   const [searchQuery, setSearchQuery] = React.useState('');
   
   // Forms & Loading
   const [loadingUsers, setLoadingUsers] = React.useState(false);
   const [loadingTxs, setLoadingTxs] = React.useState(false);
+  const [loadingAudits, setLoadingAudits] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  // Analytics Modal
+  const [selectedAnalyticsUser, setSelectedAnalyticsUser] = React.useState<any>(null);
 
   // Minting Form inputs
   const [selectedMintUser, setSelectedMintUser] = React.useState<any>(null);
@@ -75,24 +83,15 @@ export default function AdminPanel() {
     }
     setLoadingUsers(true);
     try {
-      const res = await fetch("/api/admin/users");
-      const contentType = res.headers.get("content-type");
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await res.text();
-        throw new Error(`Invalid JSON response: ${text.slice(0, 50)}`);
-      }
-      const data = await res.json();
-      if (data.success) {
-        cachedUsers = data.users;
-        cachedUsersTime = now;
-        setUsers(data.users);
-      }
+      const { collection, getDocs, limit, query } = await import('firebase/firestore');
+      const usersSnap = await getDocs(query(collection(db, "users"), limit(150)));
+      const usersData = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      cachedUsers = usersData;
+      cachedUsersTime = now;
+      setUsers(usersData);
     } catch (error) {
-      console.error("Failed to fetch users:", error);
+      console.error("Failed to fetch users client-side:", error);
       if (cachedUsers) {
         setUsers(cachedUsers);
       }
@@ -110,24 +109,15 @@ export default function AdminPanel() {
     }
     setLoadingTxs(true);
     try {
-      const res = await fetch("/api/coin/transactions");
-      const contentType = res.headers.get("content-type");
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await res.text();
-        throw new Error(`Invalid JSON response: ${text.slice(0, 50)}`);
-      }
-      const data = await res.json();
-      if (data.success) {
-        cachedTxs = data.transactions;
-        cachedTxsTime = now;
-        setTransactions(data.transactions);
-      }
+      const { collection, getDocs, limit, query, orderBy } = await import('firebase/firestore');
+      const snap = await getDocs(query(collection(db, "coin_transactions"), orderBy("createdAt", "desc"), limit(40)));
+      const transactionsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      cachedTxs = transactionsData;
+      cachedTxsTime = now;
+      setTransactions(transactionsData);
     } catch (error) {
-      console.error("Failed to fetch transactions:", error);
+      console.error("Failed to fetch transactions client-side:", error);
       if (cachedTxs) {
         setTransactions(cachedTxs);
       }
@@ -136,29 +126,59 @@ export default function AdminPanel() {
     }
   };
 
+  const fetchAudits = async () => {
+    setLoadingAudits(true);
+    try {
+      const { collection, getDocs, limit, query, orderBy } = await import('firebase/firestore');
+      const auditsSnap = await getDocs(query(collection(db, "role_change_audits"), orderBy("createdAt", "desc"), limit(100)));
+      const auditsData = auditsSnap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt && typeof data.createdAt.toDate === "function" ? data.createdAt.toDate() : data.createdAt
+        };
+      });
+      setAudits(auditsData);
+    } catch (error) {
+      console.error("Failed to fetch role audits client-side:", error);
+    } finally {
+      setLoadingAudits(false);
+    }
+  };
+
   React.useEffect(() => {
-    fetchUsers();
-    fetchLedger();
-  }, []);
+    if (currentUserId) {
+      fetchUsers();
+      fetchLedger();
+      fetchAudits();
+    }
+  }, [currentUserId]);
 
   // Set real role in database for full sync verification
   const syncDatabaseRole = async (targetRole: 'admin' | 'seller' | 'user') => {
     if (!currentUserId) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/admin/update-role", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUserId, role: targetRole })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSimulatedRole(targetRole);
-        setActiveTab(targetRole === 'admin' ? 'admin' : 'seller');
-        fetchUsers();
+      const { doc, updateDoc, setDoc, getDoc } = await import('firebase/firestore');
+      const userRef = doc(db, "users", currentUserId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        await updateDoc(userRef, { role: targetRole });
+      } else {
+        await setDoc(userRef, {
+          displayName: auth.currentUser?.displayName || "Admin User",
+          coins: 1000,
+          role: targetRole,
+          createdAt: new Date().toISOString()
+        });
       }
+      setSimulatedRole(targetRole);
+      setActiveTab(targetRole === 'admin' ? 'admin' : 'seller');
+      fetchUsers(true);
+      fetchAudits(); // fetch newly created audit log entry
     } catch (error) {
-      console.error("Error setting role in DB:", error);
+      console.error("Error setting role in DB client-side:", error);
     } finally {
       setIsSubmitting(false);
     }
@@ -167,21 +187,38 @@ export default function AdminPanel() {
   // Change user role
   const handleUpdateUserRole = async (userId: string, newRole: string) => {
     try {
-      const res = await fetch("/api/admin/update-role", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, role: newRole })
-      });
-      const data = await res.json();
-      if (data.success) {
-        // Refresh profile if self-role updated
-        if (userId === currentUserId) {
-          setSimulatedRole(newRole as any);
-        }
-        fetchUsers();
+      const { doc, updateDoc, collection, addDoc, getDoc } = await import('firebase/firestore');
+      const targetRef = doc(db, "users", userId);
+      const targetSnap = await getDoc(targetRef);
+      
+      let oldRole = "user";
+      let targetUserName = userId;
+      if (targetSnap.exists()) {
+        const targetData = targetSnap.data();
+        oldRole = targetData.role || "user";
+        targetUserName = targetData.displayName || targetData.email || userId;
       }
+      
+      await updateDoc(targetRef, { role: newRole });
+      
+      const auditsRef = collection(db, "role_change_audits");
+      await addDoc(auditsRef, {
+        changedById: currentUserId,
+        changedByName: auth.currentUser?.displayName || auth.currentUser?.email || "Admin",
+        targetUserId: userId,
+        targetUserName,
+        oldRole,
+        newRole,
+        createdAt: new Date()
+      });
+
+      if (userId === currentUserId) {
+        setSimulatedRole(newRole as any);
+      }
+      fetchUsers(true);
+      fetchAudits(); // fetch newly created audit log entry
     } catch (error) {
-      console.error("Failed to change user role:", error);
+      console.error("Failed to change user role client-side:", error);
     }
   };
 
@@ -190,29 +227,35 @@ export default function AdminPanel() {
     if (!selectedMintUser || !mintAmount) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/admin/generate-coins", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: selectedMintUser.id, 
-          amount: parseInt(mintAmount), 
-          reason: mintReason,
-          adminSecret: "TEMPORARY_SECRET"
-        })
+      const amount = parseInt(mintAmount);
+      const { doc, updateDoc, collection, addDoc, increment } = await import('firebase/firestore');
+      
+      const targetRef = doc(db, "users", selectedMintUser.id);
+      await updateDoc(targetRef, {
+        coins: increment(amount)
       });
-      const data = await res.json();
-      if (data.success) {
-        alert(`Success: Forged & Synced ${parseInt(mintAmount).toLocaleString()} coins for ${selectedMintUser.displayName}`);
-        setMintAmount('');
-        setMintReason('');
-        setSelectedMintUser(null);
-        fetchUsers();
-        fetchLedger();
-      } else {
-        alert(`Error: ${data.error}`);
-      }
+      
+      const txRef = collection(db, "coin_transactions");
+      await addDoc(txRef, {
+        type: "mint_coins",
+        adminId: currentUserId,
+        adminName: auth.currentUser?.displayName || "Admin",
+        targetUserId: selectedMintUser.id,
+        targetUserName: selectedMintUser.displayName || "User",
+        amount,
+        reason: mintReason || "Admin Minting",
+        createdAt: new Date().toISOString()
+      });
+
+      alert(`Success: Forged & Synced ${amount.toLocaleString()} coins for ${selectedMintUser.displayName}`);
+      setMintAmount('');
+      setMintReason('');
+      setSelectedMintUser(null);
+      fetchUsers(true);
+      fetchLedger(true);
     } catch (error) {
-      console.error(error);
+      console.error("Failed to mint coins client-side:", error);
+      alert(`Error minting: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -223,23 +266,28 @@ export default function AdminPanel() {
     if (!currentUserId) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/seller/purchase-coins", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sellerId: currentUserId,
-          amount,
-          costETB
-        })
+      const { doc, updateDoc, collection, addDoc, increment } = await import('firebase/firestore');
+      const sellerRef = doc(db, "users", currentUserId);
+      await updateDoc(sellerRef, {
+        coins: increment(amount)
       });
-      const data = await res.json();
-      if (data.success) {
-        alert(`Wholesale Purchase Successful! Added ${amount.toLocaleString()} coins to your Seller Account.`);
-        fetchUsers();
-        fetchLedger();
-      }
+      
+      const txRef = collection(db, "coin_transactions");
+      await addDoc(txRef, {
+        type: "wholesale_purchase",
+        sellerId: currentUserId,
+        sellerName: myProfile?.displayName || "Coin Seller",
+        amount,
+        costETB,
+        createdAt: new Date().toISOString()
+      });
+      
+      alert(`Wholesale Purchase Successful! Added ${amount.toLocaleString()} coins to your Seller Account.`);
+      fetchUsers(true);
+      fetchLedger(true);
     } catch (err) {
-      console.error("Wholesale err:", err);
+      console.error("Wholesale err client-side:", err);
+      alert(`Wholesale Purchase Failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -248,31 +296,50 @@ export default function AdminPanel() {
   // Coin Reseller Transfer/Resell execution
   const handleResellCoins = async () => {
     if (!currentUserId || !selectedResellUser || !resellAmount) return;
+    const amount = parseInt(resellAmount);
+    const priceETB = parseInt(resellPrice) || 0;
+    
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/seller/resell-coins", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { doc, runTransaction, collection } = await import('firebase/firestore');
+      const sellerRef = doc(db, "users", currentUserId);
+      const targetRef = doc(db, "users", selectedResellUser.id);
+      
+      await runTransaction(db, async (transaction) => {
+        const sellerDoc = await transaction.get(sellerRef);
+        if (!sellerDoc.exists()) throw new Error("Seller profile not found");
+        
+        const sellerCoins = sellerDoc.data().coins || 0;
+        if (sellerCoins < amount) throw new Error("Insufficient coin balance for resell");
+        
+        const targetDoc = await transaction.get(targetRef);
+        if (!targetDoc.exists()) throw new Error("Target platform user not found");
+        
+        transaction.update(sellerRef, { coins: sellerCoins - amount });
+        transaction.update(targetRef, { coins: (targetDoc.data().coins || 0) + amount });
+        
+        const txRef = doc(collection(db, "coin_transactions"));
+        transaction.set(txRef, {
+          type: "seller_resell",
           sellerId: currentUserId,
+          sellerName: sellerDoc.data().displayName || "Coin Seller",
           targetUserId: selectedResellUser.id,
-          amount: parseInt(resellAmount),
-          priceETB: parseInt(resellPrice) || 0
-        })
+          targetUserName: targetDoc.data().displayName || "Platform User",
+          amount,
+          priceETB,
+          createdAt: new Date().toISOString()
+        });
       });
-      const data = await res.json();
-      if (data.success) {
-        alert(`Resell Complete: Sent ${parseInt(resellAmount).toLocaleString()} coins to ${selectedResellUser.displayName}`);
-        setResellAmount('');
-        setResellPrice('');
-        setSelectedResellUser(null);
-        fetchUsers();
-        fetchLedger();
-      } else {
-        alert(`Failed: ${data.error}`);
-      }
+      
+      alert(`Resell Complete: Sent ${amount.toLocaleString()} coins to ${selectedResellUser.displayName}`);
+      setResellAmount('');
+      setResellPrice('');
+      setSelectedResellUser(null);
+      fetchUsers(true);
+      fetchLedger(true);
     } catch (error) {
-      console.error("Resell error:", error);
+      console.error("Resell error client-side:", error);
+      alert(`Failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -391,6 +458,34 @@ export default function AdminPanel() {
             Coin Reseller Hub
           </button>
         )}
+
+        {simulatedRole === 'admin' && (
+          <button
+            onClick={() => setActiveTab('network')}
+            className={`flex items-center gap-2 px-5 py-3 border-b-2 text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
+              activeTab === 'network' 
+                ? 'border-amber-400 text-white font-black' 
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            Diagnostics Room Console
+          </button>
+        )}
+
+        {simulatedRole === 'admin' && (
+          <button
+            onClick={() => setActiveTab('reseller_system')}
+            className={`flex items-center gap-2 px-5 py-3 border-b-2 text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
+              activeTab === 'reseller_system' 
+                ? 'border-amber-400 text-white font-black' 
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <Coins className="w-3.5 h-3.5 text-amber-450" />
+            Reseller Coin Portal
+          </button>
+        )}
       </div>
 
       {/* Main Panel Content Render Panels */}
@@ -473,6 +568,15 @@ export default function AdminPanel() {
 
                           <button
                             type="button"
+                            onClick={() => setSelectedAnalyticsUser(user)}
+                            className="bg-blue-950/40 hover:bg-blue-900/30 border border-blue-800/20 hover:border-blue-600/30 text-blue-400 text-[9px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                          >
+                            <BarChart3 className="w-3 h-3" />
+                            Analytics
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => {
                               setSelectedMintUser(user);
                               setMintAmount('');
@@ -550,13 +654,111 @@ export default function AdminPanel() {
                     type="button"
                     onClick={handleMintCoins}
                     disabled={isSubmitting || !selectedMintUser || !mintAmount}
-                    className="w-full bg-red-600 hover:bg-red-700 disabled:bg-zinc-850 disabled:text-zinc-600 text-white font-black py-3.5 rounded-xl text-[10px] uppercase tracking-wider transition-all shadow-lg hover:shadow-red-600/10 cursor-pointer hover:scale-[1.01]"
+                    className="w-full bg-red-600 hover:bg-red-700 disabled:bg-zinc-850 disabled:text-zinc-650 text-white font-black py-3.5 rounded-xl text-[10px] uppercase tracking-wider transition-all shadow-lg hover:shadow-red-600/10 cursor-pointer hover:scale-[1.01]"
                   >
                     {isSubmitting ? "Generating Assets..." : "Execute & Mint Coins"}
                   </button>
                 </div>
               </div>
             </div>
+
+            {/* Audit Logs Row */}
+            <div className="bg-zinc-900/40 border border-zinc-850 p-6 rounded-[2rem] space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-zinc-800 p-1.5 rounded-lg">
+                    <History className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-black uppercase text-xs">Role Audit Logs</h3>
+                    <p className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest">A secure log of all role update events</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchAudits}
+                  disabled={loadingAudits}
+                  className="bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 px-3 py-1.5 text-zinc-400 hover:text-white rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3 h-3 ${loadingAudits ? 'animate-spin' : ''}`} />
+                  <span className="text-[8px] font-black uppercase tracking-wider px-1">Refresh</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto border border-zinc-850 rounded-xl bg-zinc-950">
+                <div className="max-h-[300px] overflow-y-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-900 bg-zinc-900/40 text-[9px] text-zinc-500 font-black uppercase tracking-wider">
+                        <th className="px-4 py-3">Operator</th>
+                        <th className="px-4 py-3">Target User</th>
+                        <th className="px-4 py-3">Transition</th>
+                        <th className="px-4 py-3 text-right">Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-900/50">
+                      {loadingAudits ? (
+                        <tr>
+                          <td colSpan={4} className="p-8 text-center text-zinc-500">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                              <span className="text-[9px] font-bold uppercase tracking-widest">Querying Audit Ledger...</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : audits.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-8 text-center text-zinc-550 text-[10px] uppercase font-black tracking-widest">
+                            No role change audits found
+                          </td>
+                        </tr>
+                      ) : (
+                        audits.map((audit) => (
+                          <tr key={audit.id} className="hover:bg-zinc-900/40 border-zinc-900/50 transition-colors">
+                            <td className="px-4 py-3.5">
+                              <div className="font-bold text-white uppercase">{audit.changedByName || 'System'}</div>
+                              <div className="text-[8px] text-zinc-550 font-mono">UID: {audit.changedById}</div>
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <div className="font-bold text-zinc-300 uppercase">{audit.targetUserName}</div>
+                              <div className="text-[8px] text-zinc-550 font-mono">UID: {audit.targetUserId}</div>
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                                <span className="bg-zinc-900 border border-zinc-850 px-1.5 py-0.5 rounded text-zinc-400 text-[8px] font-black uppercase">
+                                  {audit.oldRole}
+                                </span>
+                                <span className="text-zinc-600">→</span>
+                                <span className="bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.5 rounded text-amber-400 text-[8px] font-black uppercase">
+                                  {audit.newRole}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3.5 text-right font-mono text-[9px] text-zinc-400">
+                              {audit.createdAt ? new Date(audit.createdAt).toLocaleString() : 'Pending/Just now'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Network Quality Diagnostics (Admin Role) */}
+        {activeTab === 'network' && simulatedRole === 'admin' && (
+          <div className="space-y-6 animate-fadeIn text-white">
+            <NetworkQualityDashboard />
+          </div>
+        )}
+
+        {/* Tab 4: Barca-live Reseller Coin System */}
+        {activeTab === 'reseller_system' && simulatedRole === 'admin' && (
+          <div className="space-y-6 animate-fadeIn text-white">
+            <ResellerCoinSystem />
           </div>
         )}
 
@@ -778,6 +980,43 @@ export default function AdminPanel() {
           </div>
         </div>
       </div>
+      
+      {/* Analytics Modal */}
+      <AnimatePresence>
+        {selectedAnalyticsUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setSelectedAnalyticsUser(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 w-full max-w-4xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto relative"
+            >
+              <button 
+                onClick={() => setSelectedAnalyticsUser(null)}
+                className="absolute top-6 right-6 p-2 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 rounded-xl text-zinc-400 hover:text-white transition-colors z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              
+              <div className="mb-6">
+                <h2 className="text-xl font-black text-white uppercase tracking-tight">Host Analytics Diagnostics</h2>
+                <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Live metrics for <span className="text-amber-400">{selectedAnalyticsUser.displayName}</span></p>
+              </div>
+
+              <div className="bg-zinc-900/50 rounded-[2rem] border border-zinc-800/80 p-2">
+                <RoomAnalytics roomTitle={`${selectedAnalyticsUser.displayName} Live Diagnostics`} />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
+import crypto from "crypto";
 import { adminDb } from './src/lib/admin.ts';
 import { FieldValue } from 'firebase-admin/firestore';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -121,6 +122,46 @@ app.get("/api/agency/dashboard/:agentId", async (req, res) => {
   } catch (error) { res.status(500).json({ error: "Agency dashboard error" }); }
 });
 
+// Daily Streak Claim
+app.post("/api/bonus/streak/claim", async (req, res) => {
+  const { userId } = req.body;
+  try {
+    const userRef = adminDb.doc(`users/${userId}`);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) return res.status(404).json({ error: "User not found" });
+    
+    const data = userSnap.data() || {};
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Yesterday's date
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = yesterdayDate.toISOString().split('T')[0];
+    
+    if (data.lastStreakClaimedDate === today) {
+      return res.status(400).json({ error: "Already claimed today" });
+    }
+
+    let newStreak = 1;
+    if (data.lastStreakClaimedDate === yesterday) {
+      newStreak = (data.loginStreak || 0) + 1;
+      if (newStreak > 7) newStreak = 1; // Reset after 7 days
+    }
+
+    // Rewards: 100, 200, 300, 400, 500, 750, 1500
+    const rewards = [100, 200, 300, 400, 500, 750, 1500];
+    const rewardAmount = rewards[newStreak - 1] || 100;
+
+    await userRef.update({
+      coins: FieldValue.increment(rewardAmount),
+      loginStreak: newStreak,
+      lastStreakClaimedDate: today
+    });
+
+    res.json({ success: true, amount: rewardAmount, streak: newStreak });
+  } catch (error) { res.status(500).json({ error: "Streak claim error" }); }
+});
+
 // Daily Bonus Claim
 app.post("/api/bonus/claim", async (req, res) => {
   const { userId } = req.body;
@@ -172,6 +213,361 @@ app.post("/api/room/heartbeat", async (req, res) => {
   } catch (error) { res.status(500).json({ error: "Heartbeat error" }); }
 });
 
+// ==========================================
+// BARCA-LIVE SECURE COIN GENERATION SYSTEM
+// ==========================================
+
+const DAILY_LIMIT = 50000;
+const MAX_SHOT_PER_SECOND = 8;
+
+interface ActiveUserStats {
+  shots: number;
+  lastShot: number;
+}
+
+const activeUsers: Record<string, ActiveUserStats> = {};
+
+function generateTransactionId(): string {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+async function validateUser(uid: string): Promise<any> {
+  const userRef = await adminDb.collection("users").doc(uid).get();
+
+  if (!userRef.exists) {
+    throw new Error("User not found");
+  }
+
+  return userRef.data();
+}
+
+function antiCheatCheck(uid: string): boolean {
+  const now = Date.now();
+
+  if (!activeUsers[uid]) {
+    activeUsers[uid] = {
+      shots: 1,
+      lastShot: now
+    };
+    return true;
+  }
+
+  const diff = now - activeUsers[uid].lastShot;
+
+  if (diff < 1000) {
+    activeUsers[uid].shots++;
+    if (activeUsers[uid].shots > MAX_SHOT_PER_SECOND) {
+      return false;
+    }
+  } else {
+    activeUsers[uid].shots = 1;
+  }
+
+  activeUsers[uid].lastShot = now;
+  return true;
+}
+
+// Generate Coins Endpoint
+app.post(["/generateCoins", "/api/generateCoins"], async (req, res) => {
+  try {
+    const { uid, gameType, fishType, score } = req.body;
+
+    if (!uid || !gameType || !fishType) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing fields"
+      });
+    }
+
+    const safe = antiCheatCheck(uid);
+
+    if (!safe) {
+      await adminDb.collection("reports").add({
+        uid,
+        reason: "Coin cheat detected",
+        createdAt: FieldValue.serverTimestamp()
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: "Cheat detected"
+      });
+    }
+
+    const userData = await validateUser(uid);
+    const todayCoins = userData.todayCoins || 0;
+
+    if (todayCoins >= DAILY_LIMIT) {
+      return res.status(403).json({
+        success: false,
+        message: "Daily limit reached"
+      });
+    }
+
+    let reward = 0;
+
+    switch (fishType) {
+      case "small":
+        reward = 20;
+        break;
+      case "medium":
+        reward = 100;
+        break;
+      case "shark":
+        reward = 500;
+        break;
+      case "boss":
+        reward = 5000;
+        break;
+      case "jackpot":
+        reward = 10000;
+        break;
+      default:
+        reward = 10;
+    }
+
+    if (userData.vip === true) {
+      reward += Math.floor(reward * 0.20);
+    }
+
+    if (score >= 1000) {
+      reward += 200;
+    }
+
+    await adminDb.collection("users").doc(uid).update({
+      coins: FieldValue.increment(reward),
+      todayCoins: FieldValue.increment(reward),
+      totalKills: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+
+    const txId = generateTransactionId();
+
+    await adminDb.collection("transactions").doc(txId).set({
+      txId,
+      uid,
+      gameType,
+      fishType,
+      reward,
+      score,
+      createdAt: FieldValue.serverTimestamp()
+    });
+
+    await adminDb.collection("leaderboard").doc(uid).set({
+      uid,
+      coins: (userData.coins || 0) + reward,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      txId,
+      reward,
+      totalCoins: (userData.coins || 0) + reward,
+      message: "Coins generated successfully"
+    });
+
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// VIP Purchase Endpoint
+app.post(["/buyVIP", "/api/buyVIP"], async (req, res) => {
+  try {
+    const { uid } = req.body;
+    if (!uid) return res.status(400).json({ success: false, message: "Missing uid" });
+
+    await adminDb.collection("users").doc(uid).update({
+      vip: true,
+      vipExpire: Date.now() + (30 * 24 * 60 * 60 * 1000)
+    });
+
+    res.json({
+      success: true,
+      message: "VIP activated"
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+// Withdraw Endpoint
+app.post(["/withdraw", "/api/withdraw"], async (req, res) => {
+  try {
+    const { uid, amount, method } = req.body;
+    if (!uid || !amount) return res.status(400).json({ success: false, message: "Missing required fields" });
+
+    const userRef = await adminDb.collection("users").doc(uid).get();
+    if (!userRef.exists) return res.status(404).json({ success: false, message: "User not found" });
+
+    const user = userRef.data() || {};
+    const userCoins = user.coins || 0;
+
+    if (userCoins < amount) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient balance"
+      });
+    }
+
+    await adminDb.collection("users").doc(uid).update({
+      coins: FieldValue.increment(-amount)
+    });
+
+    await adminDb.collection("withdrawals").add({
+      uid,
+      amount,
+      method,
+      status: "pending",
+      createdAt: FieldValue.serverTimestamp()
+    });
+
+    res.json({
+      success: true,
+      message: "Withdraw request sent"
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+// Claim Mission Endpoint
+app.post(["/claimMission", "/api/claimMission"], async (req, res) => {
+  try {
+    const { uid, missionId } = req.body;
+    if (!uid || !missionId) return res.status(400).json({ success: false, message: "Missing uid or missionId" });
+
+    let reward = 0;
+
+    switch (missionId) {
+      case "kill10":
+        reward = 500;
+        break;
+      case "boss":
+        reward = 5000;
+        break;
+      case "room":
+        reward = 1000;
+        break;
+    }
+
+    await adminDb.collection("users").doc(uid).update({
+      coins: FieldValue.increment(reward)
+    });
+
+    res.json({
+      success: true,
+      reward
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+// Rank Endpoint
+app.get(["/rank/:uid", "/api/rank/:uid"], async (req, res) => {
+  try {
+    const uid = req.params.uid;
+    const user = await adminDb.collection("users").doc(uid).get();
+
+    if (!user.exists) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const coins = user.data()?.coins || 0;
+    let rank = "Bronze";
+
+    if (coins >= 100000) {
+      rank = "King";
+    } else if (coins >= 50000) {
+      rank = "Diamond";
+    } else if (coins >= 10000) {
+      rank = "Gold";
+    }
+
+    res.json({
+      success: true,
+      rank
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+// Admin Users List Endpoint
+app.get(["/admin/users", "/api/admin/users-list"], async (req, res) => {
+  try {
+    const users = await adminDb.collection("users").get();
+    const result: any[] = [];
+
+    users.forEach(doc => {
+      result.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+
+    res.json({
+      success: true,
+      users: result
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+// Telebirr Payment Endpoint
+app.post(["/telebirr/pay", "/api/telebirr/pay"], async (req, res) => {
+  try {
+    const { uid, amount } = req.body;
+    res.json({
+      success: true,
+      paymentUrl: "https://telebirr-payment-url"
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+// Chapa Payment Endpoint
+app.post(["/chapa/pay", "/api/chapa/pay"], async (req, res) => {
+  try {
+    const { uid, amount } = req.body;
+    res.json({
+      success: true,
+      paymentUrl: "https://checkout.chapa.co"
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
 // Admin: Generate Coins
 app.post("/api/admin/generate-coins", async (req, res) => {
   const { userId, amount, reason, adminSecret } = req.body;
@@ -220,17 +616,76 @@ app.get("/api/admin/users", async (req, res) => {
 
 // Admin: Update user's role on the platform
 app.post("/api/admin/update-role", async (req, res) => {
-  const { userId, role } = req.body;
+  const { userId, role, changedById } = req.body;
   if (!userId || !role) {
     return res.status(400).json({ error: "Missing parameters" });
   }
   try {
-    await adminDb.doc(`users/${userId}`).update({ role });
+    const targetRef = adminDb.doc(`users/${userId}`);
+    const targetSnap = await targetRef.get();
+    let oldRole = "user";
+    let targetUserName = userId;
+    if (targetSnap.exists) {
+      const targetData = targetSnap.data() || {};
+      oldRole = targetData.role || "user";
+      targetUserName = targetData.displayName || targetData.email || userId;
+    }
+
+    let changedByName = "System/Anonymous";
+    const executorId = changedById || userId; // fallback to user themselves
+    if (executorId) {
+      const changedRef = adminDb.doc(`users/${executorId}`);
+      const changedSnap = await changedRef.get();
+      if (changedSnap.exists) {
+        const changedData = changedSnap.data() || {};
+        changedByName = changedData.displayName || changedData.email || executorId;
+      } else {
+        changedByName = executorId;
+      }
+    }
+
+    await targetRef.update({ role });
+
+    // Save audit log
+    await adminDb.collection("role_change_audits").add({
+      changedById: executorId,
+      changedByName,
+      targetUserId: userId,
+      targetUserName,
+      oldRole,
+      newRole: role,
+      createdAt: FieldValue.serverTimestamp()
+    });
+
     res.json({ success: true, message: `User role updated successfully to ${role}` });
   } catch (error) {
+    console.error("Error updating role:", error);
     res.status(500).json({ error: "Could not update user role" });
   }
 });
+
+// Admin: Get all role change audit logs
+app.get("/api/admin/role-audits", async (req, res) => {
+  try {
+    const auditsSnap = await adminDb.collection("role_change_audits")
+      .orderBy("createdAt", "desc")
+      .limit(100)
+      .get();
+    const audits = auditsSnap.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        createdAt: data.createdAt && typeof data.createdAt.toDate === "function" ? data.createdAt.toDate() : data.createdAt
+      };
+    });
+    res.json({ success: true, audits });
+  } catch (error) {
+    console.error("Error fetching role audits:", error);
+    res.status(500).json({ error: "Could not fetch audit logs" });
+  }
+});
+
 
 // Seller: Purchase coin package wholesale from platform
 app.post("/api/seller/purchase-coins", async (req, res) => {
@@ -396,6 +851,54 @@ app.post("/api/games/roulette", async (req, res) => {
 
     res.json({ success: true, winningNumber, winningColor, win, message: win ? ` Roulette Win! ${winningNumber} ${winningColor}` : `Roulette Lose! ${winningNumber} ${winningColor}` });
   } catch (error) { res.status(500).json({ error: "Roulette error" }); }
+});
+
+// Game Logic: Fishing
+app.post("/api/games/fishing", async (req, res) => {
+  const { userId, betAmount } = req.body; // betAmount is cost per shot
+  if (!userId || !betAmount || betAmount <= 0) return res.status(400).json({ error: "Invalid request" });
+
+  try {
+    const userRef = adminDb.doc(`users/${userId}`);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) return res.status(404).json({ error: "User not found" });
+    
+    if ((userSnap.data()?.coins || 0) < betAmount) return res.status(400).json({ error: "Insufficient coins" });
+
+    // Catch logic
+    const roll = Math.random();
+    let caughtFish = null;
+    let multiplier = 0;
+
+    // Golden Shark: 1% chance, 50x
+    // Hammerhead: 5% chance, 10x
+    // Turtle: 15% chance, 4x
+    // Jellyfish: 25% chance, 2x
+    // Small Fish: 30% chance, 1.2x
+    // Miss: 24% chance
+    if (roll < 0.01) { caughtFish = "Golden Shark"; multiplier = 50; }
+    else if (roll < 0.06) { caughtFish = "Hammerhead"; multiplier = 10; }
+    else if (roll < 0.21) { caughtFish = "Golden Turtle"; multiplier = 4; }
+    else if (roll < 0.46) { caughtFish = "Jellyfish"; multiplier = 2; }
+    else if (roll < 0.76) { caughtFish = "Small Fish"; multiplier = 1.2; }
+
+    const winAmount = caughtFish ? Math.floor(betAmount * multiplier) : 0;
+    const balanceChange = winAmount - betAmount;
+
+    await userRef.update({
+      coins: FieldValue.increment(balanceChange)
+    });
+
+    res.json({
+        success: true,
+        caughtFish,
+        winAmount,
+        win: !!caughtFish,
+        message: caughtFish ? `You caught a ${caughtFish}! Won ${winAmount} coins.` : `Missed! Try again.`
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Fishing error" });
+  }
 });
 
 // Coin balance with USD conversion

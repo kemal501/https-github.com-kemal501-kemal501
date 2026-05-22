@@ -1,10 +1,12 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, UserPlus, ClipboardList, TrendingUp, Search, X, CheckCircle2, ShieldCheck, QrCode, Share2, Briefcase, Star, Settings, Plus, Camera, Sparkles } from 'lucide-react';
+import { Users, UserPlus, ClipboardList, TrendingUp, Search, X, CheckCircle2, ShieldCheck, QrCode, Share2, Briefcase, Star, Settings, Plus, Camera, Sparkles, Crown, Medal, Diamond, Award, Activity, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import DatePicker from './DatePicker';
+import NetworkQualityDashboard from './NetworkQualityDashboard';
+import AgentSystemRoom from './AgentSystemRoom';
 
 interface Host {
   id: string;
@@ -37,7 +39,8 @@ export default function AgentDashboard() {
   const [showVerificationModal, setShowVerificationModal] = React.useState(false);
   const [verificationStatus, setVerificationStatus] = React.useState<'none' | 'pending' | 'verified'>('none');
   const [inviteCode, setInviteCode] = React.useState('');
-  const [activeTab, setActiveTab] = React.useState<'team' | 'tasks' | 'stats' | 'earnings'>('team');
+  const [activeTab, setActiveTab] = React.useState<'team' | 'tasks' | 'stats' | 'earnings' | 'network'>('team');
+  const [subTab, setSubTab] = React.useState<'list' | 'system'>('list');
   const [isLoading, setIsLoading] = React.useState(true);
   const [earningsSort, setEarningsSort] = React.useState<{ field: 'date' | 'amount', order: 'asc' | 'desc' }>({ field: 'date', order: 'desc' });
 
@@ -449,6 +452,18 @@ export default function AgentDashboard() {
     );
   }
 
+  const getTierInfo = (earnings: number) => {
+    if (earnings >= 500000) return { name: 'Diamond Agency', badgeName: 'Diamond', color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-400/20', icon: Diamond };
+    if (earnings >= 250000) return { name: 'Platinum Agency', badgeName: 'Platinum', color: 'text-slate-300', bg: 'bg-slate-300/10', border: 'border-slate-300/20', icon: Award };
+    if (earnings >= 100000) return { name: 'Gold Agency', badgeName: 'Gold', color: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/20', icon: Crown };
+    if (earnings >= 50000) return { name: 'Silver Agency', badgeName: 'Silver', color: 'text-zinc-300', bg: 'bg-zinc-300/10', border: 'border-zinc-300/20', icon: Medal };
+    return { name: 'Bronze Agency', badgeName: 'Bronze', color: 'text-orange-400', bg: 'bg-orange-400/10', border: 'border-orange-400/20', icon: ShieldCheck };
+  };
+
+  const agencyEarnings = (agencyInfo as any).totalEarnings || 142500;
+  const tierInfo = userRole === 'agent' ? getTierInfo(agencyEarnings) : null;
+  const TierIcon = tierInfo?.icon || ShieldCheck;
+
   return (
     <div className="p-6 space-y-10 pb-32">
       {/* Agency Header */}
@@ -456,9 +471,9 @@ export default function AgentDashboard() {
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <ShieldCheck className="w-4 h-4 text-blue-400" />
-              <span className="text-blue-400 text-[10px] font-black uppercase tracking-widest">
-                {userRole === 'agent' ? agencyInfo.tier : 'Verified Member'}
+              <TierIcon className={cn("w-4 h-4", tierInfo?.color || "text-blue-400")} />
+              <span className={cn("text-[10px] font-black uppercase tracking-widest", tierInfo?.color || "text-blue-400")}>
+                {userRole === 'agent' ? tierInfo?.name : 'Verified Member'}
               </span>
             </div>
             <h1 
@@ -540,7 +555,8 @@ export default function AgentDashboard() {
           { id: 'team', icon: Users, label: userRole === 'agent' ? 'My Team' : 'Team Feed' },
           { id: 'tasks', icon: ClipboardList, label: 'Tasks' },
           { id: 'earnings', icon: TrendingUp, label: 'Earnings' },
-          { id: 'stats', icon: Star, label: 'Growth' }
+          { id: 'stats', icon: Star, label: 'Growth' },
+          { id: 'network', icon: Activity, label: 'Quality Feed' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -601,70 +617,99 @@ export default function AgentDashboard() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="grid grid-cols-1 gap-4"
+            className="space-y-6"
           >
-            {userRole === 'agent' && (
+            {/* Sub-tab Selection Header */}
+            <div className="flex bg-zinc-950/80 p-1 rounded-2xl border border-zinc-900 self-start max-w-sm">
               <button 
-                onClick={() => setShowTaskModal(true)}
-                className="bg-zinc-900 border border-zinc-800 border-dashed p-6 rounded-[2.5rem] flex items-center justify-center gap-3 group hover:border-amber-400/50 transition-all"
+                onClick={() => setSubTab('list')}
+                className={cn(
+                  "flex-1 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer text-center",
+                  subTab === 'list' ? "bg-amber-400 text-black shadow-lg shadow-amber-400/10" : "text-zinc-500 hover:text-zinc-350"
+                )}
               >
-                <div className="bg-zinc-800 p-2 rounded-xl group-hover:bg-amber-400/10 group-hover:text-amber-400 transition-all">
-                  <Plus className="w-5 h-5" />
-                </div>
-                <span className="text-zinc-500 font-black uppercase tracking-widest text-[10px] group-hover:text-white">Create New Task</span>
+                Task Matrix
               </button>
-            )}
+              <button 
+                onClick={() => setSubTab('system')}
+                className={cn(
+                  "flex-1 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5",
+                  subTab === 'system' ? "bg-amber-400 text-black shadow-lg shadow-amber-400/10" : "text-zinc-500 hover:text-zinc-350"
+                )}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                Agent Task Rooms System
+              </button>
+            </div>
 
-            {tasks.map(task => (
-              <div key={task.id} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <h4 className="text-white font-black italic uppercase text-sm tracking-tight">{task.title}</h4>
-                    {task.assignedTo && (
-                      <p className="text-[8px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
-                        <Users className="w-3 h-3" />
-                        Assigned to: {hosts.find(h => h.id === task.assignedTo)?.name}
-                      </p>
-                    )}
+            {subTab === 'system' ? (
+              <AgentSystemRoom />
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {userRole === 'agent' && (
+                  <button 
+                    onClick={() => setShowTaskModal(true)}
+                    className="bg-zinc-900 border border-zinc-800 border-dashed p-6 rounded-[2.5rem] flex items-center justify-center gap-3 group hover:border-amber-400/50 transition-all w-full text-left"
+                  >
+                    <div className="bg-zinc-800 p-2 rounded-xl group-hover:bg-amber-400/10 group-hover:text-amber-400 transition-all">
+                      <Plus className="w-5 h-5" />
+                    </div>
+                    <span className="text-zinc-500 font-black uppercase tracking-widest text-[10px] group-hover:text-white">Create New Task</span>
+                  </button>
+                )}
+
+                {tasks.map(task => (
+                  <div key={task.id} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] space-y-4 text-left">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <h4 className="text-white font-black italic uppercase text-sm tracking-tight">{task.title}</h4>
+                        {task.assignedTo && (
+                          <p className="text-[8px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
+                            <Users className="w-3 h-3" />
+                            Assigned to: {hosts.find(h => h.id === task.assignedTo)?.name}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-amber-400 text-[10px] font-black uppercase bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20">
+                        {task.rewardType === 'usd' ? '$' : ''}{task.reward.toLocaleString()} {task.rewardType === 'coins' ? 'COINS' : 'USD'}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[9px] font-black uppercase text-zinc-500 tracking-widest">
+                        <span>Progress</span>
+                        <span>{task.progress}%</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${task.progress}%` }}
+                          className="h-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-zinc-500">
+                        <ClipboardList className="w-3 h-3" />
+                        <span className="text-[8px] font-bold uppercase tracking-widest">Ends in {task.deadline}</span>
+                      </div>
+                      {userRole === 'host' && task.status === 'available' && (
+                        <button 
+                          onClick={() => startTask(task.id)}
+                          className="bg-amber-400 text-black text-[9px] font-black uppercase tracking-widest px-4 py-2 rounded-xl hover:bg-amber-300 transition-all"
+                        >
+                          Start Task
+                        </button>
+                      )}
+                      {userRole === 'host' && task.status === 'in-progress' && task.progress < 100 && (
+                        <button className="text-amber-400 text-[10px] font-black uppercase tracking-widest hover:underline">
+                          Resume
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-amber-400 text-[10px] font-black uppercase bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20">
-                    {task.rewardType === 'usd' ? '$' : ''}{task.reward.toLocaleString()} {task.rewardType === 'coins' ? 'COINS' : 'USD'}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-[9px] font-black uppercase text-zinc-500 tracking-widest">
-                    <span>Progress</span>
-                    <span>{task.progress}%</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${task.progress}%` }}
-                      className="h-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-zinc-500">
-                    <ClipboardList className="w-3 h-3" />
-                    <span className="text-[8px] font-bold uppercase tracking-widest">Ends in {task.deadline}</span>
-                  </div>
-                  {userRole === 'host' && task.status === 'available' && (
-                    <button 
-                      onClick={() => startTask(task.id)}
-                      className="bg-amber-400 text-black text-[9px] font-black uppercase tracking-widest px-4 py-2 rounded-xl hover:bg-amber-300 transition-all"
-                    >
-                      Start Task
-                    </button>
-                  )}
-                  {userRole === 'host' && task.status === 'in-progress' && task.progress < 100 && (
-                    <button className="text-amber-400 text-[10px] font-black uppercase tracking-widest hover:underline">
-                      Resume
-                    </button>
-                  )}
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </motion.div>
         )}
 
@@ -826,6 +871,17 @@ export default function AgentDashboard() {
                 ))}
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'network' && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            <NetworkQualityDashboard />
           </motion.div>
         )}
       </AnimatePresence>

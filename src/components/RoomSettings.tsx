@@ -996,6 +996,26 @@ export default function RoomSettings() {
               </span>
             </div>
 
+            {/* Packet Loss Indicator */}
+            <div className="flex items-center gap-1.5 border-l border-zinc-800/80 pl-4">
+              <span className="text-zinc-500 uppercase tracking-widest text-[9px]">Packet Loss:</span>
+              {(() => {
+                const latestMetricsPoint = networkMetrics[networkMetrics.length - 1];
+                const loss = latestMetricsPoint ? latestMetricsPoint.packetLoss : 0;
+                let colorClass = "text-emerald-400 bg-emerald-950/40 border border-emerald-500/10";
+                if (loss >= 5) {
+                  colorClass = "text-rose-400 bg-rose-950/40 border border-rose-500/10 animate-pulse font-black";
+                } else if (loss >= 1) {
+                  colorClass = "text-amber-400 bg-amber-950/40 border border-amber-500/10 font-bold";
+                }
+                return (
+                  <span className={cn("font-black px-1.5 py-0.5 rounded text-[10px] transition-colors", colorClass)}>
+                    {loss !== null ? `${loss.toFixed(2)}%` : '0.00%'}
+                  </span>
+                );
+              })()}
+            </div>
+
             {/* Micro Graph (60s history) */}
             {autoCloudSync && (
               <div className="hidden sm:flex items-center border-l border-zinc-800/80 pl-4 h-5">
@@ -1481,6 +1501,51 @@ export default function RoomSettings() {
             </div>
           </div>
         </div>
+
+        {/* Real-time Packet Loss Threshold Alert Board */}
+        {(() => {
+          const latestMetricsPoint = networkMetrics[networkMetrics.length - 1];
+          const loss = latestMetricsPoint ? latestMetricsPoint.packetLoss : 0;
+          
+          let alertColor = "border-emerald-500/15 bg-emerald-500/5 text-emerald-400";
+          let alertLabel = "Optimal Stream Quality";
+          let alertDescription = "Packet drop is under 1%. Excellent WebRTC connection state with perfect audio clarity.";
+          let dotColor = "bg-emerald-400";
+
+          if (loss >= 5) {
+            alertColor = "border-rose-500/25 bg-rose-500/5 text-rose-400";
+            alertLabel = "Critical Signal Loss Link";
+            alertDescription = "Packet drop exceeds 5%. High audio jitter and voice packet fragmentation detected.";
+            dotColor = "bg-rose-400";
+          } else if (loss >= 1) {
+            alertColor = "border-amber-500/20 bg-amber-500/5 text-amber-400";
+            alertLabel = "Slight Network Congestion";
+            alertDescription = "Packet drop is between 1% and 5%. Minor signal variance detected. Live stream remains active.";
+            dotColor = "bg-amber-400";
+          }
+
+          return (
+            <div className={`grid grid-cols-1 md:grid-cols-12 gap-4 p-4 rounded-xl border ${alertColor} transition-all duration-300`}>
+              <div className="md:col-span-4 flex flex-col justify-center border-b md:border-b-0 md:border-r border-zinc-800/80 pb-3 md:pb-0 md:pr-4">
+                <span className="text-[8px] text-zinc-500 font-black uppercase tracking-widest block mb-0.5">Live Packet Loss Rate</span>
+                <div className="flex items-baseline gap-1.5">
+                  <h4 className="text-xl font-black font-mono text-white">{loss.toFixed(2)}%</h4>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 leading-none">Drop</span>
+                </div>
+              </div>
+              <div className="md:col-span-8 flex items-center gap-3 pl-1">
+                <div className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${dotColor}`} />
+                  <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${dotColor}`} />
+                </div>
+                <div>
+                  <h5 className="text-[10px] font-black uppercase tracking-wider text-white">{alertLabel}</h5>
+                  <p className="text-[9px] text-zinc-400 font-medium leading-normal mt-0.5">{alertDescription}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         
         <div className="h-48 w-full bg-zinc-950 rounded-xl p-4 border border-zinc-900">
           <ResponsiveContainer width="100%" height="100%">
@@ -1525,7 +1590,9 @@ export default function RoomSettings() {
                 stroke="#fbbf24" 
                 strokeWidth={2} 
                 dot={false}
-                animationDuration={300}
+                isAnimationActive={true}
+                animationDuration={1200}
+                animationEasing="ease-in-out"
                 activeDot={{ r: 4, fill: "#fbbf24", stroke: "#000", strokeWidth: 2 }}
               />
               <Line 
@@ -1535,7 +1602,9 @@ export default function RoomSettings() {
                 stroke="#fb7185" 
                 strokeWidth={2} 
                 dot={false}
-                animationDuration={300}
+                isAnimationActive={true}
+                animationDuration={1200}
+                animationEasing="ease-in-out"
                 activeDot={{ r: 4, fill: "#fb7185", stroke: "#000", strokeWidth: 2 }}
               />
             </LineChart>

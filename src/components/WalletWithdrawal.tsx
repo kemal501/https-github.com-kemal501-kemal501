@@ -14,7 +14,9 @@ import {
   ArrowRight,
   Loader2,
   Building2,
-  Bitcoin
+  Bitcoin,
+  Flame,
+  CalendarCheck
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -23,6 +25,112 @@ import { doc, updateDoc, setDoc, serverTimestamp, increment, getDoc, collection,
 const CONVERSION_RATE = 1000; // 1000 coins = $1
 const MIN_WITHDRAWAL_USD = 10;
 const MIN_WITHDRAWAL_COINS = MIN_WITHDRAWAL_USD * CONVERSION_RATE;
+
+const DailyLoginStreak = ({ user }: { user: any }) => {
+  const [claiming, setClaiming] = React.useState(false);
+  const [justClaimed, setJustClaimed] = React.useState(false);
+  
+  const today = new Date().toISOString().split('T')[0];
+  const isClaimedToday = user?.lastStreakClaimedDate === today;
+  const currentStreak = user?.loginStreak || 0;
+  
+  const handleClaim = async () => {
+    if (!auth.currentUser || isClaimedToday || claiming) return;
+    setClaiming(true);
+    try {
+      const res = await fetch('/api/bonus/streak/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: auth.currentUser.uid })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setJustClaimed(true);
+        setTimeout(() => setJustClaimed(false), 3000);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const streakDays = [1, 2, 3, 4, 5, 6, 7];
+  const rewards = [100, 200, 300, 400, 500, 750, 1500];
+
+  return (
+    <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 mb-8 relative overflow-hidden group">
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-amber-400 opacity-50" />
+      
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Flame className={cn("w-5 h-5", currentStreak > 0 ? "text-orange-500" : "text-zinc-500")} />
+            <h3 className="text-white font-black italic tracking-tighter text-lg uppercase">Daily Streak</h3>
+          </div>
+          <p className="text-zinc-500 text-[10px] uppercase tracking-widest font-bold">Login consecutive days for higher rewards</p>
+        </div>
+        <div className="text-right">
+          <div className="text-2xl font-black text-amber-400">{currentStreak} <span className="text-sm text-zinc-500 uppercase tracking-widest">Days</span></div>
+        </div>
+      </div>
+
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-none snap-x">
+        {streakDays.map((day, ix) => {
+          const isCompleted = day <= currentStreak && (day < currentStreak || isClaimedToday);
+          const isNext = day === (isClaimedToday ? currentStreak + 1 : currentStreak + 1);
+          const isCurrent = day === currentStreak && isClaimedToday;
+          let newStreakToUse = isClaimedToday ? currentStreak : currentStreak + 1;
+          const isTodayBox = day === newStreakToUse;
+
+          return (
+            <div 
+              key={day}
+              className={cn(
+                "relative snap-center shrink-0 w-[4.5rem] rounded-2xl flex flex-col items-center justify-center py-3 border transition-all duration-300",
+                isCompleted 
+                  ? "bg-amber-400/10 border-amber-400/30 text-amber-400" 
+                  : isTodayBox && !isClaimedToday 
+                    ? "bg-orange-500/20 border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.3)] text-orange-400" 
+                    : "bg-black/40 border-white/5 text-zinc-600 grayscale opacity-70"
+              )}
+            >
+              {isCompleted && (
+                <div className="absolute top-1 right-1">
+                  <CheckCircle2 className="w-3 h-3 text-amber-500" />
+                </div>
+              )}
+              <span className="text-[9px] font-black uppercase tracking-widest mb-1">Day {day}</span>
+              <div className="flex items-center gap-1 font-black text-xs">
+                <span>{rewards[ix]}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {!isClaimedToday ? (
+        <button 
+          onClick={handleClaim}
+          disabled={claiming}
+          className="w-full bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-500 hover:to-amber-400 text-black py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 transition-all"
+        >
+          {claiming ? <Loader2 className="w-4 h-4 animate-spin" /> : (
+            <>
+              <CalendarCheck className="w-4 h-4" />
+              Claim Day {currentStreak + 1} Reward
+            </>
+          )}
+        </button>
+      ) : (
+        <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 py-3.5 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
+          <CheckCircle2 className="w-4 h-4" />
+          {justClaimed ? "Successfully Claimed!" : "Come back tomorrow"}
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface WithdrawalRecord {
   id: string;
@@ -175,6 +283,8 @@ export default function WalletWithdrawal() {
           Withdraw your earnings to any bank or wallet globally. $10 minimum.
         </p>
       </header>
+
+      <DailyLoginStreak user={user} />
 
       {/* Balance Card */}
       <div className="relative group">

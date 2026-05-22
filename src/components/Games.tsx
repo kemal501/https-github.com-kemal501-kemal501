@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { auth, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
+import FishingGame from './FishingGame';
 
 interface Game {
   icon: React.ElementType;
@@ -12,13 +13,14 @@ interface Game {
   maxBet: number;
   isDice?: boolean;
   isRoulette?: boolean;
+  isFishing?: boolean;
   isFree?: boolean;
 }
 
 const gamesList: Game[] = [
   { icon: Trophy, name: "PyramidSlots", minBet: 10, maxBet: 10000 },
   { icon: Target, name: "ChickenRoad", minBet: 5, maxBet: 5000 },
-  { icon: Fish, name: "FishingStar", minBet: 10, maxBet: 8000 },
+  { icon: Fish, name: "FishingStar", minBet: 10, maxBet: 8000, isFishing: true },
   { icon: Zap, name: "MagicSlot", minBet: 20, maxBet: 20000 },
   { icon: Target, name: "Yummy", minBet: 5, maxBet: 3000 },
   { icon: Diamond, name: "CrazyGems", minBet: 15, maxBet: 15000 },
@@ -28,7 +30,7 @@ const gamesList: Game[] = [
   { icon: Target, name: "GoldenPinata", minBet: 10, maxBet: 12000 },
   { icon: Flower, name: "GoldenFlower", minBet: 10, maxBet: 10000 },
   { icon: Target, name: "FortuneTiger", minBet: 20, maxBet: 20000 },
-  { icon: Waves, name: "Ocean Hunt", minBet: 10, maxBet: 10000 },
+  { icon: Waves, name: "Ocean Hunt", minBet: 10, maxBet: 10000, isFishing: true },
   { icon: Target, name: "Dice Roll", minBet: 5, maxBet: 5000, isDice: true },
   { icon: Radio, name: "Roulette", minBet: 10, maxBet: 10000, isRoulette: true },
   { icon: Star, name: "Daily Free Spin", minBet: 0, maxBet: 0, isFree: true }
@@ -83,6 +85,9 @@ export default function Games() {
         endpoint = "/api/games/roulette";
         body.betType = rouletteBetType;
         body.betValue = rouletteBetValue;
+      } else if (selectedGame.isFishing) {
+        endpoint = "/api/games/fishing";
+        body.betAmount = betAmount; // Cost per shot
       }
 
       const res = await fetch(endpoint, {
@@ -164,7 +169,9 @@ export default function Games() {
       </div>
 
       <AnimatePresence>
-        {selectedGame && (
+        {selectedGame?.isFishing ? (
+          <FishingGame key="fishing" onClose={() => setSelectedGame(null)} />
+        ) : selectedGame && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
@@ -274,6 +281,31 @@ export default function Games() {
                   </div>
                 )}
 
+                {/* Fishing Options */}
+                {selectedGame.isFishing && (
+                  <div className="bg-black/40 rounded-[2rem] p-6 border border-zinc-800 space-y-4">
+                     <p className="text-zinc-500 text-[9px] font-black uppercase tracking-widest text-center">Underwater Target Scope</p>
+                     
+                     <div className="flex gap-2 justify-center">
+                        <button className="px-4 py-2 flex items-center justify-center gap-2 rounded-lg transition-all bg-amber-400 text-black shadow-lg shadow-amber-400/20">
+                          <Target className="w-4 h-4" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">AIM</span>
+                        </button>
+                        <button className="px-4 py-2 flex items-center justify-center gap-2 rounded-lg transition-all bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700">
+                          <Zap className="w-4 h-4" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">Fast</span>
+                        </button>
+                        <button className="px-4 py-2 flex items-center justify-center gap-2 rounded-lg transition-all bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700">
+                          <RotateCcw className="w-4 h-4" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">Auto</span>
+                        </button>
+                     </div>
+                     <p className="text-[10px] font-black text-center text-zinc-500 italic mt-2">
+                       Shoot at the fish to catch them! Golden Sharks yield 50x rewards.
+                     </p>
+                  </div>
+                )}
+
                 <div className="bg-black/40 rounded-[2rem] p-6 border border-zinc-800 space-y-4">
                   <p className="text-zinc-500 text-[9px] font-black uppercase tracking-widest text-center">Place Your Bet</p>
                   <div className="flex items-center justify-center gap-6">
@@ -322,11 +354,20 @@ export default function Games() {
                 >
                   {isPlaying ? (
                     <div className="flex items-center justify-center gap-2">
-                      <RotateCcw className="w-4 h-4 animate-spin" />
-                      SPINNING...
+                       {selectedGame.isFishing ? (
+                         <>
+                           <Target className="w-4 h-4 animate-bounce" />
+                           FIRING...
+                         </>
+                       ) : (
+                         <>
+                           <RotateCcw className="w-4 h-4 animate-spin" />
+                           SPINNING...
+                         </>
+                       )}
                     </div>
                   ) : (
-                    "PLACE BET NOW"
+                    selectedGame.isFishing ? "SHOOT CANNON" : "PLACE BET NOW"
                   )}
                 </button>
               </div>

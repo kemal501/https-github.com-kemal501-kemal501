@@ -29,6 +29,7 @@ export default function UserTasks() {
 
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [userCoins, setUserCoins] = React.useState(0);
+  const [minutesInRoom, setMinutesInRoom] = React.useState(0);
 
   const [sitRewardState, setSitRewardState] = React.useState({
     durationSeconds: 0,
@@ -114,6 +115,7 @@ export default function UserTasks() {
         const data = snap.data();
         setUserCoins(data.coins || 0);
         setIsFaceVerified(data.isFaceVerified || false);
+        setMinutesInRoom(data.minutesInRoomToday || 0);
         if (data.createdAt) {
           setRegistrationDate(data.createdAt.toDate());
         }
@@ -132,6 +134,10 @@ export default function UserTasks() {
         
         let status = task.status;
         let progress = task.progress || 0;
+
+        if (task.id === 'engagement') {
+          progress = minutesInRoom;
+        }
 
         if (completionSnap.exists()) {
           status = 'completed';
@@ -164,7 +170,7 @@ export default function UserTasks() {
           title: 'Active Host/Listener',
           description: 'Stay active in room for 1 hour.',
           reward: isNewUser ? 2000 : 1000,
-          progress: 0,
+          progress: minutesInRoom,
           target: 60,
           type: 'daily',
           status: isFaceVerified ? 'available' : 'locked'
@@ -184,7 +190,7 @@ export default function UserTasks() {
       unsubUser();
       unsubTasks();
     };
-  }, [isFaceVerified]);
+  }, [isFaceVerified, minutesInRoom]);
 
   const claimReward = async (task: Task) => {
     if (!auth.currentUser) return;
@@ -588,14 +594,11 @@ export default function UserTasks() {
                 </div>
               )}
 
-              {task.id === 'engagement' && task.status === 'available' && task.progress < task.target && (
-                <button 
-                  onClick={() => setTasks(prev => prev.map(t => t.id === 'engagement' ? { ...t, progress: t.target } : t))}
-                  className="w-full bg-zinc-800 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] hover:bg-amber-400 hover:text-black transition-all flex items-center justify-center gap-2"
-                >
+              {task.id === 'engagement' && task.status === 'available' && (task.progress < task.target || task.progress === undefined) && (
+                <div className="w-full bg-zinc-800 text-zinc-400 font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
                   <Timer className="w-4 h-4" />
-                  Simulate 2hr Activity
-                </button>
+                  Auto-completes at 60 mins
+                </div>
               )}
 
               {task.status === 'available' && (task.progress >= task.target || task.id === 'daily-bonus') && (
