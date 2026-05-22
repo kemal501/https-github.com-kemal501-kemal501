@@ -1,9 +1,10 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, UserPlus, ClipboardList, TrendingUp, Search, X, CheckCircle2, ShieldCheck, QrCode, Share2, Briefcase, Star, Settings, Plus, Camera, Sparkles, Crown, Medal, Diamond, Award, Activity, Zap } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, getDoc, updateDoc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 import DatePicker from './DatePicker';
 import NetworkQualityDashboard from './NetworkQualityDashboard';
 import AgentSystemRoom from './AgentSystemRoom';
@@ -60,6 +61,23 @@ export default function AgentDashboard() {
 
   const [hosts, setHosts] = React.useState<Host[]>([]);
   const [tasks, setTasks] = React.useState<AgencyTask[]>([]);
+  const [giftData, setGiftData] = React.useState<{name: string, value: number}[]>([]);
+
+  // Sync Gifts for stats
+  React.useEffect(() => {
+    const fetchGifts = async () => {
+      const q = query(collection(db, "coin_transactions"), where("type", "==", "gift"));
+      const snap = await getDocs(q);
+      const data: Record<string, number> = {};
+      snap.forEach(doc => {
+        const tx = doc.data();
+        const host = tx.receiverName || 'Unknown';
+        data[host] = (data[host] || 0) + (tx.amount || 0);
+      });
+      setGiftData(Object.entries(data).map(([name, value]) => ({ name, value })));
+    };
+    fetchGifts();
+  }, []);
 
   // Sync Profile and Agency info
   React.useEffect(() => {
@@ -806,6 +824,22 @@ export default function AgentDashboard() {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-6"
           >
+            {/* Host Performance Pie Chart */}
+            <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[3rem] space-y-8">
+              <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">Top Performing Hosts (Gifts)</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={giftData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#fbbf24" label>
+                      {[ '#fbbf24', '#3b82f6', '#8b5cf6', '#ec4899', '#10b981'].map((color, index) => <Cell key={`cell-${index}`} fill={color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '1rem', color: '#fff' }} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             {/* Growth Overview */}
             <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[3rem] space-y-8">
               <div className="flex items-center justify-between">

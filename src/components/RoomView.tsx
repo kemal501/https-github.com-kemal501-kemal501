@@ -5,7 +5,11 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, Shield, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key, ChevronDown, TrendingUp, Sparkle } from 'lucide-react';
+import ModerationTools from './ModerationTools';
+import Games from './Games';
+import UserTasks from './UserTasks';
+import ResellerCoinSystem from './ResellerCoinSystem';
+import { X, Mic, MicOff, Video, VideoOff, MessageSquare, Gift, Share2, Users, Star, MoreHorizontal, Send, ShieldAlert, Slash, Shield, ShieldCheck, Settings, Coins, Plus, Play, Pause, Volume2, VolumeX, Lock, Unlock, Wand2, Sparkles, Ghost, Bot, Music, Volume1, Radio, Trash2, Trophy, Bell, Key, ChevronDown, TrendingUp, Sparkle, Search, User, Target, Gamepad2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import Gifts from './Gifts';
 import ChatSidebar from './ChatSidebar';
@@ -73,8 +77,10 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setLocalStream(stream);
+        setMicPermissionError(false);
       } catch (err) {
         console.error("Failed to get microphone", err);
+        setMicPermissionError(true);
       }
     };
 
@@ -105,6 +111,13 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const [shakingSeatId, setShakingSeatId] = React.useState<number | null>(null);
   const [showGifts, setShowGifts] = React.useState(false);
   const [showHostConsole, setShowHostConsole] = React.useState(false);
+  const [showModeration, setShowModeration] = React.useState(false);
+  const [showMinigames, setShowMinigames] = React.useState(false);
+  const [showDiscover, setShowDiscover] = React.useState(false);
+  const [showTaskAgent, setShowTaskAgent] = React.useState(false);
+  const [showMe, setShowMe] = React.useState(false);
+  const [showResellerCoin, setShowResellerCoin] = React.useState(false);
+  const [micPermissionError, setMicPermissionError] = React.useState(false);
   const [showVoiceFX, setShowVoiceFX] = React.useState(false);
   const [selectedConsoleUser, setSelectedConsoleUser] = React.useState<string | null>(null);
   const [selectedVoiceEffect, setSelectedVoiceEffect] = React.useState('none');
@@ -1501,6 +1514,489 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
       </motion.div>
     );
   };
+
+  const isCustomVoiceRoom = room.type === 'voice' && (isHost || room.hostId === auth.currentUser?.uid);
+
+  // Setup custom stats and simulations for custom Voice Rooms
+  const [simulatedSpeakers, setSimulatedSpeakers] = React.useState<Record<number, boolean>>({});
+  const [joinNotification, setJoinNotification] = React.useState<string | null>(null);
+
+  // Local state for customizable host profile info
+  const [customUsername, setCustomUsername] = React.useState<string>(room.host || currentUserDisplayName);
+  const [customPhoto, setCustomPhoto] = React.useState<string>(`https://i.pravatar.cc/150?u=${room.host}`);
+
+  React.useEffect(() => {
+    if (!isCustomVoiceRoom) return;
+
+    const triggerJoinAlert = (name: string, delay: number) => {
+      return setTimeout(() => {
+        setJoinNotification(`🎉 ${name} joined the room`);
+        setTimeout(() => {
+          setJoinNotification(null);
+        }, 4000);
+      }, delay);
+    };
+
+    const t1 = triggerJoinAlert("Ahmed", 4000);
+    const t2 = triggerJoinAlert("Sami", 9000);
+
+    const speakTimer = setInterval(() => {
+      const activeState: Record<number, boolean> = {};
+      const randomInd = Math.floor(Math.random() * 9);
+      if (randomInd !== 0 && seats[randomInd]?.occupied) {
+        activeState[randomInd] = true;
+      }
+      setSimulatedSpeakers(activeState);
+    }, 3500);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearInterval(speakTimer);
+    };
+  }, [isCustomVoiceRoom, seats]);
+
+  if (isCustomVoiceRoom) {
+    const handleUsernameClick = () => {
+      const newName = window.prompt("Enter Your Name", customUsername);
+      if (newName && newName.trim() !== "") {
+        setCustomUsername(newName.trim());
+      }
+    };
+
+    const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (typeof event.target?.result === 'string') {
+            setCustomPhoto(event.target.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+
+    const handleMicToggle = async () => {
+      const targetMute = !isMuted;
+      setIsMuted(targetMute);
+      await toggleMyMute(targetMute);
+    };
+
+    const handleCopyLink = () => {
+      navigator.clipboard.writeText(window.location.href);
+      alert("🎉 Room Link Copied to Clipboard!");
+    };
+
+    const renderCustomSeatElement = (seatId: number, defaultEmoji: string, isVip: boolean = false) => {
+      const seat = seats[seatId] || { id: seatId, occupied: false, user: null, isLocked: false };
+      const isUserSpeaking = seatId === 0 && !isMuted;
+      const isSimSpeaking = simulatedSpeakers[seatId];
+      const isActivelySpeaking = isUserSpeaking || (seat.occupied && isSimSpeaking);
+
+      return (
+        <div key={seatId} className="seat flex flex-col items-center relative" onClick={() => handleSeatClick(seat)}>
+          <div className={cn(
+            "avatar w-[68px] h-[68px] sm:w-[78px] sm:h-[78px] rounded-full bg-white/11 flex items-center justify-center text-2xl sm:text-[28px] border-2 border-white/10 backdrop-blur-md relative overflow-hidden transition-all duration-300",
+            isVip && "bg-gradient-to-br from-[#ffb300] to-[#ff9100] border-yellow-400 shadow-[0_0_20px_gold] text-amber-950",
+            isActivelySpeaking && "custom-talking custom-talking-wave"
+          )}>
+            {seat.occupied && seat.user ? (
+              <img 
+                src={seatId === 0 ? customPhoto : (seat.user.avatar || `https://i.pravatar.cc/100?u=${seat.user.name}`)} 
+                alt={seat.user.name} 
+                className="w-full h-full object-cover rounded-full border-none"
+              />
+            ) : (
+              <span className="select-none">{defaultEmoji}</span>
+            )}
+
+            {/* Lock indicator overlay */}
+            {seat.isLocked && (
+              <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center">
+                <Lock className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+              </div>
+            )}
+          </div>
+          <p className="mt-2 text-[10px] sm:text-xs text-zinc-100 font-bold bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full mt-1.5 truncate max-w-[84px] text-center">
+            {seat.occupied && seat.user ? (seatId === 0 ? customUsername : seat.user.name) : (seatId + 1)}
+          </p>
+
+          <AnimatePresence>
+            {activeSeatInfoId === seatId && (
+              <div className="absolute z-[150] bottom-full mb-3 left-1/2 -translate-x-1/2 pointer-events-auto">
+                <SeatOverlay seat={seat} onModerate={() => openModeration(seat)} onLeaveSeat={leaveSeat} />
+              </div>
+            )}
+          </AnimatePresence>
+        </div>
+      );
+    };
+
+    return (
+      <div className="room w-full h-[100vh] min-h-[100vh] max-h-[100vh] relative overflow-hidden text-white font-sans select-none flex flex-col z-[60]" style={{
+        backgroundImage: "url('https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1200')",
+        backgroundPosition: 'center',
+        backgroundSize: 'cover'
+      }}>
+        {/* BLUR EFFECT BACKGROUND OVERLAY */}
+        <div className="absolute inset-0 bg-black/55 backdrop-blur-[5px] z-0" />
+
+        {/* JOIN POPUP BANNER */}
+        <AnimatePresence>
+          {joinNotification && (
+            <motion.div 
+              initial={{ y: -50, opacity: 0, x: '-50%' }}
+              animate={{ y: 0, opacity: 1, x: '-50%' }}
+              exit={{ y: -50, opacity: 0, x: '-50%' }}
+              className="absolute top-[90px] left-1/2 -translate-x-1/2 bg-[#00c853] text-white px-6 py-2.5 rounded-full font-bold shadow-[0_4px_20px_rgba(0,0,0,0.4)] z-[200] text-xs sm:text-sm uppercase tracking-wider flex items-center gap-1"
+            >
+              🎉 {joinNotification}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* TOP BAR */}
+        <div className="top flex items-center justify-between p-[15px] z-10 w-full shrink-0">
+          {/* USER PROFILE */}
+          <div className="profile flex items-center gap-3">
+            <label htmlFor="photoUpload" className="cursor-pointer relative mt-0.5 group">
+              <img 
+                id="profilePhoto"
+                src={customPhoto}
+                alt="Profile photo"
+                className="w-[60px] h-[60px] rounded-full object-cover border-2 border-yellow-400 group-hover:scale-105 active:scale-95 transition-all shadow-[0_0_12px_rgba(250,204,21,0.2)]"
+              />
+              <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] font-black uppercase text-white transition-opacity">
+                Pick
+              </div>
+            </label>
+            <input 
+              type="file"
+              id="photoUpload"
+              accept="image/*"
+              hidden
+              onChange={handlePhotoChange}
+            />
+
+            <div className="text-left flex flex-col items-start">
+              <h3 
+                id="username" 
+                onClick={handleUsernameClick} 
+                className="font-black text-white text-base sm:text-lg hover:text-amber-400 hover:underline cursor-pointer flex items-center gap-1.5"
+                title="Click to edit name"
+              >
+                {customUsername}
+                <span className="text-[10px] bg-amber-400/10 border border-amber-400/25 text-amber-400 px-1.5 py-0.5 rounded-md uppercase tracking-wider scale-90">Host</span>
+              </h3>
+              <p className="text-[11px] text-white/70 font-mono flex items-center gap-1 select-all">
+                ID: <span id="userid" className="font-bold">{room.id.substring(5, 12).toUpperCase()}</span>
+              </p>
+            </div>
+          </div>
+
+          {/* TOP ICONS */}
+          <div className="top-icons flex gap-2.5 select-none shrink-0">
+            <div 
+              onClick={handleCopyLink} 
+              className="w-[42px] h-[42px] rounded-full bg-white/15 hover:bg-white/25 active:scale-95 flex justify-center items-center backdrop-blur-[10px] text-lg cursor-pointer transition-all border border-white/5"
+              title="Copy Room Invite Link"
+            >
+              🔗
+            </div>
+            <div 
+              onClick={() => {
+                alert("Background Stream status is online");
+              }} 
+              className="w-[42px] h-[42px] rounded-full bg-white/15 hover:bg-white/25 active:scale-95 flex justify-center items-center backdrop-blur-[10px] text-lg cursor-pointer transition-all border border-white/5"
+              title="Stream Settings"
+            >
+              📺
+            </div>
+            <div 
+              onClick={onLeave} 
+              className="w-[42px] h-[42px] rounded-full bg-red-600/30 border border-red-500/20 hover:bg-red-600/50 active:scale-95 flex justify-center items-center backdrop-blur-[10px] text-lg cursor-pointer transition-all"
+              title="Leave Voice Room"
+            >
+              ✖
+            </div>
+          </div>
+        </div>
+
+        {/* MAIN BODY LAYOUT GRID WITH SEATS IN THE CENTER */}
+        <div className="flex-1 w-full relative overflow-hidden flex flex-col items-center justify-start py-8 px-4 z-10 select-none">
+          {/* SEATS GROUP CONTAINER */}
+          <div className="seats w-full max-w-lg space-y-4 sm:space-y-6 mt-4 relative">
+            {/* ROW 1 */}
+            <div className="row flex justify-center">
+              {renderCustomSeatElement(0, "🎤")}
+            </div>
+
+            {/* ROW 2 */}
+            <div className="row flex justify-center gap-[15px] sm:gap-[25px]">
+              {renderCustomSeatElement(1, "👑", true)}
+              {renderCustomSeatElement(2, "👑", true)}
+              {renderCustomSeatElement(3, "👑", true)}
+              {renderCustomSeatElement(4, "🛋")}
+            </div>
+
+            {/* ROW 3 */}
+            <div className="row flex justify-center gap-[15px] sm:gap-[25px]">
+              {renderCustomSeatElement(5, "🛋")}
+              {renderCustomSeatElement(6, "🛋")}
+              {renderCustomSeatElement(7, "🛋")}
+              {renderCustomSeatElement(8, "🛋")}
+            </div>
+          </div>
+
+          {/* LEFT MENU (FLOATING CONTAINER PANEL) */}
+          <div className="left-menu absolute top-[60%] sm:top-1/2 left-[10px] -translate-y-1/2 flex flex-col gap-2 shrink-0">
+            <button className="w-[52px] h-[80px] sm:w-[58px] sm:h-[90px] border-none rounded-[30px] bg-[#11d9d2] text-white font-black text-[11px] sm:text-xs uppercase tracking-widest shadow-lg shadow-teal-500/10 active:scale-95 transition-all cursor-pointer">
+              All
+            </button>
+            <button 
+              onClick={() => {
+                setShowHostConsole(true);
+              }}
+              className="w-[52px] h-[80px] sm:w-[58px] sm:h-[90px] border-none rounded-[30px] bg-[#222]/80 backdrop-blur-md text-white/80 font-black text-[11px] sm:text-xs uppercase tracking-widest border border-white/5 active:scale-95 transition-all cursor-pointer"
+            >
+              Room
+            </button>
+            <button 
+              onClick={() => {
+                setShowChat(!showChat);
+              }}
+              className={cn(
+                "w-[52px] h-[80px] sm:w-[58px] sm:h-[90px] border-none rounded-[30px] font-black text-[11px] sm:text-xs uppercase tracking-widest border active:scale-95 transition-all cursor-pointer",
+                showChat 
+                  ? "bg-amber-400 text-black border-amber-400 shadow-md shadow-amber-400/15" 
+                  : "bg-[#222]/80 backdrop-blur-md text-white/80 border-white/5"
+              )}
+            >
+              Chat
+            </button>
+          </div>
+
+          {/* WELCOME ANNOUNCEMENT NOTICE BOX */}
+          <div className="notice absolute left-[15px] right-[15px] sm:right-auto sm:max-w-md bottom-[115px] bg-black/60 backdrop-blur-lg border border-white/5 p-5 rounded-[20px] shadow-2xl text-left select-text">
+            <h3 className="text-[#ff4444] font-black text-xs sm:text-sm uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-[#ff4444] animate-pulse" />
+              Welcome
+            </h3>
+            <p className="text-zinc-300 text-[11px] sm:text-xs leading-relaxed font-sans">
+              Welcome to Barca-live voice room. Open your microphone and start talking with your friends live.
+            </p>
+          </div>
+
+          {/* RIGHT ACTION SHORTCUTS */}
+          <div className="right absolute right-[10px] top-[60%] sm:top-1/2 -translate-y-1/2 flex flex-col gap-2.5 shrink-0">
+            <div 
+              onClick={() => setShowHostConsole(true)}
+              className="w-[50px] h-[50px] sm:w-[58px] sm:h-[58px] rounded-[18px] bg-white/15 flex justify-center items-center text-xl sm:text-2xl backdrop-blur-[10px] transition-all hover:scale-105 active:scale-95 border border-white/10 shadow-lg cursor-pointer"
+              title="Battle / Moderator"
+            >
+              ⚔
+            </div>
+            <div 
+              onClick={() => setShowGifts(true)}
+              className="w-[50px] h-[50px] sm:w-[58px] sm:h-[58px] rounded-[18px] bg-white/15 flex justify-center items-center text-xl sm:text-2xl backdrop-blur-[10px] transition-all hover:scale-105 active:scale-95 border border-white/10 shadow-lg cursor-pointer"
+              title="Send Gift"
+            >
+              🎁
+            </div>
+            <div 
+              onClick={() => setShowSitEarnPanel(true)}
+              className="w-[50px] h-[50px] sm:w-[58px] sm:h-[58px] rounded-[18px] bg-white/15 flex justify-center items-center text-xl sm:text-2xl backdrop-blur-[10px] transition-all hover:scale-105 active:scale-95 border border-white/10 shadow-lg cursor-pointer"
+              title="Reseller Coins / Sit & Earn"
+            >
+              💰
+            </div>
+          </div>
+        </div>
+
+        {/* CHAT CONTENT SIDEBAR PANELS (Toggled overlay) */}
+        <AnimatePresence>
+          {showChat && (
+            <motion.div 
+              initial={{ opacity: 0, x: 200 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 200 }}
+              className="absolute right-[80px] top-[15px] bottom-[105px] w-[320px] bg-black/85 backdrop-blur-xl border border-zinc-900 rounded-[2rem] overflow-hidden z-30 shadow-2xl flex flex-col"
+            >
+              <div className="flex-1 overflow-hidden relative">
+                <ChatSidebar 
+                  messages={messages.filter(msg => !blockedUsers.includes(msg.senderName))} 
+                  onSendMessage={handleSendMessage}
+                  onDeleteMessage={deleteMessage}
+                  onSeatClick={handleSeatClick}
+                  isHost={isHost}
+                  roomHost={room.host}
+                  users={seats.filter(s => s.occupied && s.user).map(s => ({ name: s.user.name, avatar: s.user.avatar }))}
+                  seats={seats}
+                  onUpdateRoom={handleUpdateRoomSettings}
+                  roomData={{
+                    ...room,
+                    settings: {
+                      isPrivate,
+                      entryEffectsEnabled,
+                      isBgmEnabled,
+                      entryFee
+                    }
+                  }}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* BOTTOM ACTION BAR */}
+        <div className="bottom flex justify-between items-center p-[15px] z-20 w-full shrink-0 select-none pb-8 sm:pb-[18px]">
+          {/* MIC ACTION BUTTON */}
+          <button 
+            onClick={handleMicToggle} 
+            className={cn(
+              "mic-btn w-[68px] h-[68px] sm:w-[78px] sm:h-[78px] rounded-full border-none text-2xl sm:text-3xl flex justify-center items-center transition-all cursor-pointer shadow-lg active:scale-95",
+              !isMuted 
+                ? "bg-[#00c853] text-[30px] custom-mic-pulse shadow-[0_0_25px_rgba(0,190,83,0.5)]" 
+                : "bg-[#ff004c] text-[30px] shadow-[0_0_25px_rgba(255,0,76,0.5)]"
+            )}
+            title={!isMuted ? "Mute Microphone" : "Unmute Microphone"}
+          >
+            {!isMuted ? "🔊" : "🎤"}
+          </button>
+
+          {/* BOTTOM QUICK ACTIONS BAR */}
+          <div className="bottom-icons flex gap-2.5 sm:gap-[12px]">
+            <div 
+              onClick={() => setShowDiscover(!showDiscover)} 
+              className={cn("w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all border", showDiscover ? "bg-amber-400 text-black border-amber-400" : "bg-white/15 text-white border-white/5 hover:bg-white/20")}
+              title="Discover"
+            >
+              <Search className="w-5 h-5"/>
+            </div>
+            <div 
+              onClick={() => setShowTaskAgent(!showTaskAgent)} 
+              className={cn("w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all border", showTaskAgent ? "bg-amber-400 text-black border-amber-400" : "bg-white/15 text-white border-white/5 hover:bg-white/20")}
+              title="Task Agent"
+            >
+              <Target className="w-5 h-5"/>
+            </div>
+            <div 
+              onClick={() => setShowMinigames(!showMinigames)} 
+              className={cn("w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all border", showMinigames ? "bg-amber-400 text-black border-amber-400" : "bg-white/15 text-white border-white/5 hover:bg-white/20")}
+              title="Minigames"
+            >
+              <Gamepad2 className="w-5 h-5"/>
+            </div>
+            <div 
+              onClick={() => setShowMe(!showMe)} 
+              className={cn("w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all border", showMe ? "bg-amber-400 text-black border-amber-400" : "bg-white/15 text-white border-white/5 hover:bg-white/20")}
+              title="Me"
+            >
+              <User className="w-5 h-5"/>
+            </div>
+
+            <div 
+              onClick={() => setShowGifts(!showGifts)} 
+              className={cn("w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all border", showGifts ? "bg-amber-400 text-black border-amber-400" : "bg-white/15 text-white border-white/5 hover:bg-white/20")}
+              title="Gifting"
+            >
+              <Gift className="w-5 h-5"/>
+            </div>
+            <div 
+              onClick={() => setShowModeration(!showModeration)} 
+              className={cn("w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all border", showModeration ? "bg-amber-400 text-black border-amber-400" : "bg-white/15 text-white border-white/5 hover:bg-white/20")}
+              title="Moderator Tools"
+            >
+              <Shield className="w-5 h-5"/>
+            </div>
+            <div 
+              onClick={() => setShowResellerCoin(!showResellerCoin)} 
+              className={cn("w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all border", showResellerCoin ? "bg-amber-400 text-black border-amber-400" : "bg-white/15 text-white border-white/5 hover:bg-white/20")}
+              title="Reseller Portal"
+            >
+              <Coins className="w-5 h-5"/>
+            </div>
+            <div 
+              onClick={() => setShowHostConsole(true)} 
+              className="w-[48px] h-[48px] sm:w-[55px] sm:h-[55px] rounded-full active:scale-95 flex justify-center items-center text-lg sm:text-2xl backdrop-blur-[10px] cursor-pointer transition-all hover:bg-white/20 border border-white/5"
+              title="Console Menu"
+            >
+              <Settings className="w-5 h-5" />
+            </div>
+          </div>
+        </div>
+
+        {/* SECONDARY DIALOG ACTIONS MODES INTEGRATION */}
+        {/* Panel Container / Overlay */}
+        <AnimatePresence>
+          {showModeration && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[180] flex items-center justify-center p-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-[2.5rem] w-full max-w-lg p-8 relative max-h-[85vh] overflow-y-auto no-scrollbar shadow-2xl">
+                <button onClick={() => setShowModeration(false)} className="absolute top-6 right-6 bg-zinc-900 border border-zinc-800 p-2.5 rounded-xl text-zinc-400 hover:text-white transition-all cursor-pointer"><X className="w-5 h-5" /></button>
+                <ModerationTools />
+              </div>
+            </div>
+          )}
+          {showMinigames && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[180] flex items-center justify-center p-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-[2.5rem] w-full max-w-lg p-8 relative max-h-[85vh] overflow-y-auto no-scrollbar shadow-2xl">
+                <button onClick={() => setShowMinigames(false)} className="absolute top-6 right-6 bg-zinc-900 border border-zinc-800 p-2.5 rounded-xl text-zinc-400 hover:text-white transition-all cursor-pointer"><X className="w-5 h-5" /></button>
+                <Games />
+              </div>
+            </div>
+          )}
+          {showTaskAgent && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[180] flex items-center justify-center p-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-[2.5rem] w-full max-w-lg p-8 relative max-h-[85vh] overflow-y-auto no-scrollbar shadow-2xl">
+                <button onClick={() => setShowTaskAgent(false)} className="absolute top-6 right-6 bg-zinc-900 border border-zinc-800 p-2.5 rounded-xl text-zinc-400 hover:text-white transition-all cursor-pointer"><X className="w-5 h-5" /></button>
+                <UserTasks />
+              </div>
+            </div>
+          )}
+          {showResellerCoin && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[180] flex items-center justify-center p-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-[2.5rem] w-full max-w-lg p-8 relative max-h-[85vh] overflow-y-auto no-scrollbar shadow-2xl">
+                <button onClick={() => setShowResellerCoin(false)} className="absolute top-6 right-6 bg-zinc-900 border border-zinc-800 p-2.5 rounded-xl text-zinc-400 hover:text-white transition-all cursor-pointer"><X className="w-5 h-5" /></button>
+                <ResellerCoinSystem />
+              </div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Host console & Room Settings Panels */}
+        <AnimatePresence>
+          {showHostConsole && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[180] flex items-center justify-center p-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-[2.5rem] w-full max-w-3xl p-8 relative max-h-[85vh] overflow-y-auto no-scrollbar shadow-2xl">
+                <button onClick={() => setShowHostConsole(false)} className="absolute top-6 right-6 bg-zinc-900 border border-zinc-800 p-2.5 rounded-xl text-zinc-400 hover:text-white transition-all cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="space-y-6 text-left">
+                  <div>
+                    <h2 className="text-2xl font-black italic uppercase tracking-tight text-amber-400">Host Command Center</h2>
+                    <p className="text-zinc-500 text-[9px] uppercase tracking-widest font-mono">Stream and Seat Moderation Panel</p>
+                  </div>
+                  <RoomAnalytics room={room} seats={seats} />
+                  <div className="border-t border-zinc-900 pt-6">
+                    <button 
+                      onClick={() => {
+                        setShowHostConsole(false);
+                        alert("🎉 Host broadcast settings successfully saved & synchronized.");
+                      }}
+                      className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-white py-4 font-black uppercase text-xs tracking-widest rounded-2xl hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    >
+                      Apply and Return
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
 
   return (
     <motion.div 

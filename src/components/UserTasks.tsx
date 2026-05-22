@@ -549,8 +549,9 @@ export default function UserTasks() {
                   <motion.div 
                     initial={{ width: 0 }}
                     animate={{ width: `${(task.progress / task.target) * 100}%` }}
+                    transition={{ type: "spring", stiffness: 100, damping: 20 }}
                     className={cn(
-                      "h-full transition-all",
+                      "h-full",
                       task.status === 'completed' ? "bg-green-500" : "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]"
                     )}
                   />
