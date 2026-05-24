@@ -1,0 +1,227 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and balance information.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "email": { "type": "string" },
+        "coins": { "type": "number" },
+        "isVerified": { "type": "boolean" },
+        "isFaceVerified": { "type": "boolean" },
+        "faceVerifiedAt": { "type": "string", "format": "date-time" },
+        "agencyId": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "host", "agent"] },
+        "bio": { "type": "string" },
+        "category": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "following": { "type": "array" }
+      },
+      "required": ["displayName", "coins", "role"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "Voice/Video chat room data and settings.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "type": { "type": "string", "enum": ["voice", "video"] },
+        "status": { "type": "string", "enum": ["live", "ended"] },
+        "viewerCount": { "type": "number" },
+        "seats": { "type": "array" },
+        "settings": { "type": "object" },
+        "bannedUsers": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "hostId", "hostName", "type", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Chat messages within a room.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "text", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Agency or system tasks for hosts.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "reward": { "type": "number" },
+        "rewardType": { "type": "string", "enum": ["coins", "usd"] },
+        "deadline": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["available", "in-progress", "completed"] },
+        "assignedTo": { "type": "string" },
+        "agencyId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "progress": { "type": "number" },
+        "target": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "reward", "rewardType", "status", "creatorId"]
+    },
+    "TaskCompletion": {
+      "title": "Task Completion",
+      "description": "Records of users completing tasks.",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "userId": { "type": "string" },
+        "rewardClaimed": { "type": "number" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["taskId", "userId", "rewardClaimed", "completedAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Coin transactions (gifts, rewards).",
+      "type": "object",
+      "properties": {
+        "fromId": { "type": "string" },
+        "toId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["gift", "reward", "purchase"] },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["amount", "type", "status", "createdAt"]
+    },
+    "Agency": {
+      "title": "Agency",
+      "description": "Broadcasting agency information.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "tier": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "createdAt"]
+    },
+    "SittingReward": {
+      "title": "Sitting Reward",
+      "description": "Sitting/broadcasting time tracking and rewards for hosts and users.",
+      "type": "object",
+      "properties": {
+        "durationSeconds": { "type": "number" },
+        "claimedHalf": { "type": "boolean" },
+        "claimedFull": { "type": "boolean" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      }
+    },
+    "GlobalMusic": {
+      "title": "Global Music Broadcast",
+      "description": "Music currently broadcasting to all rooms in the application.",
+      "type": "object",
+      "properties": {
+        "isPlaying": { "type": "boolean" },
+        "title": { "type": "string" },
+        "playbackUrl": { "type": "string" },
+        "startedAt": { "type": "number" },
+        "duration": { "type": "number" },
+        "sender": { "type": "string" }
+      },
+      "required": ["isPlaying", "title", "playbackUrl"]
+    },
+    "Recording": {
+      "title": "Recording",
+      "description": "Saved broadcast session recording stored in Cloud Storage and indexed in Firestore.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "recordedAt": { "type": "string", "format": "date-time" },
+        "durationSeconds": { "type": "number" },
+        "fileSizeBytes": { "type": "number" },
+        "storageBucketUrl": { "type": "string" },
+        "status": { "type": "string" },
+        "trackTitle": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["title", "recordedAt", "durationSeconds", "storageBucketUrl", "status", "userId"]
+    },
+    "FollowInfo": {
+      "title": "Follow Info",
+      "description": "Information about a followed host/user.",
+      "type": "object",
+      "properties": {
+        "followedAt": { "type": "string", "format": "date" }
+      }
+    },
+    "RoleChangeAudit": {
+      "title": "Role Change Audit",
+      "description": "Log entry tracking who changed which user role and when.",
+      "type": "object",
+      "properties": {
+        "changedById": { "type": "string" },
+        "changedByName": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserName": { "type": "string" },
+        "oldRole": { "type": "string" },
+        "newRole": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["changedById", "changedByName", "targetUserId", "targetUserName", "oldRole", "newRole"]
+    }
+  },
+  "firestore": {
+    "role_change_audits/{auditId}": {
+      "schema": "RoleChangeAudit",
+      "description": "Role change audit trails."
+    },
+    "global_music/{musicId}": {
+      "schema": "GlobalMusic",
+      "description": "Interactive global room audio state and synchronisation."
+    },
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile data."
+    },
+    "users/{userId}/following/{followingId}": {
+      "schema": "FollowInfo",
+      "description": "Subcollection tracking followed users/hosts."
+    },
+    "users/{userId}/task_completions/{taskId}": {
+      "schema": "TaskCompletion",
+      "description": "Users task completion records."
+    },
+    "users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Users transaction history."
+    },
+    "users/{userId}/sitting_rewards/{sittingId}": {
+      "schema": "SittingReward",
+      "description": "Sitting reward tracking data."
+    },
+    "users/{userId}/recordings/{recordingId}": {
+      "schema": "Recording",
+      "description": "Saved broadcast session recording info."
+    },
+    "rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Live room data."
+    },
+    "rooms/{roomId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Room chat messages."
+    },
+    "tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Global or agency-specific tasks."
+    },
+    "agencies/{agencyId}": {
+      "schema": "Agency",
+      "description": "Agency details."
+    }
+  }
+}

@@ -1,0 +1,642 @@
+<!-- ===========================
+BARCA-LIVE FULL PLATFORM
+Single HTML File Demo
+=========================== -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Barca-live</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family:Arial;
+}
+
+body{
+    background:#021526;
+    overflow:hidden;
+}
+
+#game{
+    width:100vw;
+    height:100vh;
+    position:relative;
+    overflow:hidden;
+    background:url('https://images.unsplash.com/photo-1544551763-46a013bb70d5?q=80&w=1974') center/cover;
+}
+
+#topbar{
+    position:absolute;
+    top:10px;
+    left:10px;
+    display:flex;
+    gap:10px;
+    z-index:1000;
+}
+
+.card{
+    background:rgba(0,0,0,0.6);
+    color:white;
+    padding:10px 20px;
+    border-radius:20px;
+}
+
+#roomSeats{
+    position:absolute;
+    top:80px;
+    left:50%;
+    transform:translateX(-50%);
+    width:90%;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:20px;
+}
+
+.seat{
+    height:80px;
+    border-radius:50%;
+    background:rgba(255,255,255,0.15);
+    border:2px solid rgba(255,255,255,0.3);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    color:white;
+    font-size:20px;
+}
+
+.host{
+    background:gold;
+    color:black;
+}
+
+#fishArea{
+    position:absolute;
+    width:100%;
+    height:100%;
+}
+
+.fish{
+    position:absolute;
+    width:90px;
+    height:60px;
+    background:orange;
+    border-radius:50%;
+    cursor:pointer;
+}
+
+.shark{
+    width:150px;
+    height:80px;
+    background:red;
+}
+
+.boss{
+    width:220px;
+    height:120px;
+    background:purple;
+    box-shadow:0 0 30px purple;
+}
+
+.jackpot{
+    width:100px;
+    height:70px;
+    background:gold;
+    box-shadow:0 0 20px gold;
+}
+
+#cannon{
+    position:absolute;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    width:120px;
+    height:120px;
+    border-radius:20px;
+    background:linear-gradient(to bottom,#ff00ff,#4a004a);
+    border:4px solid white;
+}
+
+#controls{
+    position:absolute;
+    bottom:20px;
+    right:20px;
+    display:flex;
+    gap:10px;
+}
+
+.btn{
+    padding:15px 20px;
+    border:none;
+    border-radius:15px;
+    background:#00ccff;
+    color:white;
+    font-weight:bold;
+    cursor:pointer;
+}
+
+.panel{
+    position:absolute;
+    right:10px;
+    width:240px;
+    background:rgba(0,0,0,0.7);
+    color:white;
+    padding:15px;
+    border-radius:20px;
+}
+
+#leaderboard{
+    top:100px;
+}
+
+#missions{
+    top:320px;
+}
+
+#shop{
+    top:550px;
+}
+
+#chatBox{
+    position:absolute;
+    left:50%;
+    transform:translateX(-50%);
+    bottom:140px;
+    width:350px;
+    background:rgba(0,0,0,0.7);
+    padding:10px;
+    border-radius:20px;
+}
+
+#messages{
+    height:120px;
+    overflow:auto;
+    color:white;
+    margin-bottom:10px;
+}
+
+input{
+    width:100%;
+    padding:10px;
+    border:none;
+    border-radius:10px;
+}
+
+.explosion{
+    position:absolute;
+    width:100px;
+    height:100px;
+    border-radius:50%;
+    background:gold;
+    opacity:0.7;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="game">
+
+<div id="topbar">
+    <div class="card">Coins: <span id="coins">1000</span></div>
+    <div class="card">Rank: <span id="rank">Bronze</span></div>
+    <div class="card">Kills: <span id="kills">0</span></div>
+    <div class="card">VIP: <span id="vip">No</span></div>
+</div>
+
+<div id="roomSeats">
+    <div class="seat host">👑</div>
+    <div class="seat">2</div>
+    <div class="seat">3</div>
+    <div class="seat">4</div>
+    <div class="seat">5</div>
+    <div class="seat">6</div>
+    <div class="seat">7</div>
+    <div class="seat">8</div>
+    <div class="seat">9</div>
+</div>
+
+<div id="fishArea"></div>
+
+<div id="cannon"></div>
+
+<div id="controls">
+    <button class="btn" onclick="toggleAim()">AIM</button>
+    <button class="btn" onclick="buyCoins()">BUY</button>
+    <button class="btn" onclick="withdraw()">WITHDRAW</button>
+    <button class="btn" onclick="becomeVIP()">VIP</button>
+</div>
+
+<div id="leaderboard" class="panel">
+<h3>Leaderboard</h3>
+<p>1. Ethio Ag... 120000</p>
+<p>2. Barca King 90000</p>
+<p>3. Diamond VIP 70000</p>
+</div>
+
+<div id="missions" class="panel">
+<h3>Daily Missions</h3>
+<p>✔ Kill 10 Fish = 500</p>
+<p>✔ Kill Shark = 1000</p>
+<p>✔ Kill Boss = 5000</p>
+<p>✔ Jackpot Fish = 10000</p>
+</div>
+
+<div id="shop" class="panel">
+<h3>Coin Shop</h3>
+<p>1000 Coins = $1</p>
+<p>5000 Coins = $5</p>
+<p>10000 Coins = $10</p>
+</div>
+
+<div id="chatBox">
+
+<div id="messages"></div>
+
+<input
+type="text"
+id="chatInput"
+placeholder="Send message..."
+onkeydown="sendMessage(event)"
+>
+
+</div>
+
+</div>
+
+<script>
+
+/* =========================
+FIREBASE CONFIG
+========================= */
+
+const firebaseConfig = {
+
+apiKey: "YOUR_API_KEY",
+authDomain: "YOUR_DOMAIN",
+projectId: "YOUR_PROJECT_ID",
+storageBucket: "YOUR_BUCKET",
+messagingSenderId: "YOUR_SENDER",
+appId: "YOUR_APP_ID"
+
+};
+
+firebase.initializeApp(firebaseConfig);
+
+const db = firebase.firestore();
+
+/* =========================
+GLOBAL VARIABLES
+========================= */
+
+const fishArea = document.getElementById("fishArea");
+
+let coins = 1000;
+let kills = 0;
+let autoAim = false;
+let vip = false;
+
+/* =========================
+UPDATE UI
+========================= */
+
+function updateUI(){
+
+document.getElementById("coins").innerText = coins;
+document.getElementById("kills").innerText = kills;
+
+if(coins > 100000){
+    document.getElementById("rank").innerText = "King";
+}
+else if(coins > 50000){
+    document.getElementById("rank").innerText = "Diamond";
+}
+else{
+    document.getElementById("rank").innerText = "Bronze";
+}
+
+document.getElementById("vip").innerText =
+vip ? "Yes" : "No";
+
+}
+
+/* =========================
+CREATE FISH
+========================= */
+
+function createFish(type="normal"){
+
+const fish = document.createElement("div");
+
+fish.classList.add("fish");
+
+if(type==="shark"){
+fish.classList.add("shark");
+}
+
+if(type==="boss"){
+fish.classList.add("boss");
+}
+
+if(type==="jackpot"){
+fish.classList.add("jackpot");
+}
+
+fish.style.top =
+Math.random() * (window.innerHeight - 300) + "px";
+
+fish.style.left = "-250px";
+
+fish.dataset.reward = 100;
+
+if(type==="shark"){
+fish.dataset.reward = 500;
+}
+
+if(type==="boss"){
+fish.dataset.reward = 5000;
+}
+
+if(type==="jackpot"){
+fish.dataset.reward = 10000;
+}
+
+fish.onclick = () => killFish(fish);
+
+fishArea.appendChild(fish);
+
+let x = -250;
+
+const speed =
+Math.random() * 5 + 2;
+
+const move = setInterval(()=>{
+
+x += speed;
+
+fish.style.left = x + "px";
+
+if(x > window.innerWidth + 300){
+fish.remove();
+clearInterval(move);
+}
+
+if(autoAim){
+killFish(fish);
+}
+
+},30);
+
+}
+
+/* =========================
+KILL FISH
+========================= */
+
+function killFish(fish){
+
+if(!fish.parentNode) return;
+
+const reward =
+Number(fish.dataset.reward);
+
+coins += reward;
+kills++;
+
+createExplosion(
+fish.offsetLeft,
+fish.offsetTop
+);
+
+fish.remove();
+
+updateUI();
+
+saveCoins();
+
+}
+
+/* =========================
+EXPLOSION EFFECT
+========================= */
+
+function createExplosion(x,y){
+
+const explosion =
+document.createElement("div");
+
+explosion.classList.add("explosion");
+
+explosion.style.left = x + "px";
+explosion.style.top = y + "px";
+
+fishArea.appendChild(explosion);
+
+setTimeout(()=>{
+explosion.remove();
+},500);
+
+}
+
+/* =========================
+AUTO AIM
+========================= */
+
+function toggleAim(){
+
+autoAim = !autoAim;
+
+alert("Auto AIM: " + autoAim);
+
+}
+
+/* =========================
+VIP SYSTEM
+========================= */
+
+function becomeVIP(){
+
+vip = true;
+
+coins += 5000;
+
+updateUI();
+
+alert("VIP Activated");
+
+}
+
+/* =========================
+BUY COINS
+========================= */
+
+function buyCoins(){
+
+coins += 10000;
+
+updateUI();
+
+alert("Telebirr / Chapa Payment Success");
+
+}
+
+/* =========================
+WITHDRAW
+========================= */
+
+function withdraw(){
+
+if(coins >= 10000){
+
+coins -= 10000;
+
+updateUI();
+
+alert("Withdraw Request Sent");
+
+db.collection("withdrawals").add({
+amount:10000,
+status:"pending",
+createdAt:new Date()
+});
+
+}else{
+
+alert("Minimum 10000 coins");
+
+}
+
+}
+
+/* =========================
+CHAT SYSTEM
+========================= */
+
+function sendMessage(event){
+
+if(event.key==="Enter"){
+
+const input =
+document.getElementById("chatInput");
+
+const div =
+document.createElement("div");
+
+div.innerText =
+"You: " + input.value;
+
+div.style.color = "white";
+
+document.getElementById("messages")
+.appendChild(div);
+
+input.value = "";
+
+}
+
+}
+
+/* =========================
+FIREBASE SAVE
+========================= */
+
+function saveCoins(){
+
+db.collection("users")
+.doc("demoUser")
+.set({
+coins:coins,
+kills:kills,
+vip:vip
+});
+
+}
+
+/* =========================
+ANTI CHEAT
+========================= */
+
+let lastShot = 0;
+
+function antiCheat(){
+
+const now = Date.now();
+
+if(now - lastShot < 50){
+
+alert("Cheat Detected");
+
+return false;
+
+}
+
+lastShot = now;
+
+return true;
+
+}
+
+/* =========================
+TOURNAMENT
+========================= */
+
+setInterval(()=>{
+
+alert("Tournament Started!");
+
+},600000);
+
+/* =========================
+MATCHMAKING
+========================= */
+
+function findMatch(){
+
+alert("Searching players...");
+
+}
+
+/* =========================
+SPAWNERS
+========================= */
+
+setInterval(()=>{
+createFish();
+},1000);
+
+setInterval(()=>{
+createFish("shark");
+},5000);
+
+setInterval(()=>{
+createFish("boss");
+},15000);
+
+setInterval(()=>{
+createFish("jackpot");
+},20000);
+
+/* =========================
+START
+========================= */
+
+updateUI();
+
+</script>
+
+</body>
+</html>

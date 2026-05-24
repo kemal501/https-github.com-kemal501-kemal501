@@ -1,0 +1,6 @@
+{
+  "name": "Barca-live",
+  "description": "A premium live voice and video social platform featuring real-time streaming, voice rooms, gifting, secure global wallet, and agency management systems for host recruitment.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
