@@ -1,15 +1,18 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mail, Lock, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Loader2, AlertCircle, CheckCircle2, Github } from 'lucide-react';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
   updateProfile,
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { googleSignIn } from '../lib/auth';
+import { googleSignIn, initAuth } from '../lib/auth';
+import { cn } from '../lib/utils';
 
 export default function AuthForm() {
   const [isLogin, setIsLogin] = React.useState(true);
@@ -104,7 +107,7 @@ export default function AuthForm() {
   };
 
   return (
-    <div className="min-h-screen bg-black font-sans text-white p-6 flex flex-col items-center justify-center space-y-8 relative overflow-hidden" id="auth-form">
+    <div className="min-h-screen bg-black font-sans text-white p-6 flex flex-col items-center justify-center space-y-8 relative overflow-hidden">
       {/* Background Accents */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-400/10 blur-[120px] rounded-full" />
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-orange-600/10 blur-[120px] rounded-full" />

@@ -638,7 +638,7 @@ export default function App() {
                                   {originalIndex === 0 ? <Trophy className="w-3.5 h-3.5" /> : <span className="text-[10px] font-black italic">#{originalIndex + 1}</span>}
                                 </div>
                                 {/* Category Badge */}
-                                <div className="absolute -bottom-1 -right-1 bg-zinc-950 border border-zinc-800 rounded-lg p-1 shadow-lg">
+                                <div className="absolute -bottom-1 -right-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1 shadow-lg">
                                   {host.category === 'Music' && <Music className="w-2.5 h-2.5 text-blue-400" />}
                                   {host.category === 'Comedy' && <Theater className="w-2.5 h-2.5 text-purple-400" />}
                                   {host.category === 'Gaming' && <Gamepad2 className="w-2.5 h-2.5 text-green-400" />}
@@ -661,7 +661,7 @@ export default function App() {
                           animate={{ opacity: 1 }}
                           className="w-full py-8 text-center"
                         >
-                          <p className="text-zinc-650 text-[10px] font-black uppercase tracking-[0.2em]">No hosts found Matching your search</p>
+                          <p className="text-zinc-600 text-[10px] font-black uppercase tracking-[0.2em]">No hosts found Matching your search</p>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -735,8 +735,8 @@ export default function App() {
 
               <div className="space-y-6">
                 <div className="flex items-center gap-3 px-4">
-                  <ShieldCheck className="w-4 h-4 text-zinc-650" />
-                  <h3 className="text-zinc-650 font-black uppercase tracking-[0.3em] text-[10px]">Security Frameworks</h3>
+                  <ShieldCheck className="w-4 h-4 text-zinc-600" />
+                  <h3 className="text-zinc-600 font-black uppercase tracking-[0.3em] text-[10px]">Security Frameworks</h3>
                 </div>
                 <RoomSettings />
                 <ModerationTools />
@@ -803,10 +803,10 @@ export default function App() {
                 <div className="relative mb-6">
                   <div className="w-32 h-32 rounded-full p-1 bg-gradient-to-r from-amber-400 to-orange-600 animate-spin-slow">
                     <div className="w-full h-full rounded-full bg-black flex items-center justify-center p-1">
-                      <img src={userProfile.photoURL} alt={userProfile.displayName} className="w-full h-full rounded-full object-cover" referrerPolicy="no-referrer" />
+                      <img src={userProfile.photoURL} alt={userProfile.displayName} className="w-full h-full rounded-full object-cover" />
                     </div>
                   </div>
-                  <div className="absolute bottom-2 right-2 bg-amber-400 p-2 rounded-xl shadow-lg animate-bounce">
+                  <div className="absolute bottom-2 right-2 bg-amber-400 p-2 rounded-xl shadow-lg">
                     <Shield className="w-4 h-4 text-black" />
                   </div>
                 </div>
@@ -831,7 +831,7 @@ export default function App() {
                   {!userProfile.isVerified && (
                     <button 
                       onClick={() => setShowFaceVerification(true)}
-                      className="bg-red-500 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-red-500/20 active:scale-95 transition-all flex items-center gap-2 cursor-pointer border-0 animate-pulse"
+                      className="bg-red-500 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-red-500/20 active:scale-95 transition-all flex items-center gap-2"
                     >
                       <Camera className="w-4 h-4" />
                       Verify Face
@@ -839,12 +839,12 @@ export default function App() {
                   )}
                   <button 
                     onClick={() => setActiveTab('agency')}
-                    className="bg-zinc-900 border border-zinc-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-zinc-800 transition-all flex items-center gap-2 cursor-pointer border border-white/5"
+                    className="bg-zinc-900 border border-zinc-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-zinc-800 transition-all flex items-center gap-2"
                   >
                     <Settings className="w-4 h-4" />
                     Edit Profile
                   </button>
-                  <button className="bg-amber-400 text-black px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-amber-400/20 active:scale-95 transition-all cursor-pointer border-0">
+                  <button className="bg-amber-400 text-black px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-amber-400/20 active:scale-95 transition-all">
                     View Public Page
                   </button>
                 </div>
@@ -881,7 +881,7 @@ export default function App() {
                   <button 
                     type="button"
                     onClick={() => setShowFaceVerification(true)}
-                    className="w-full md:w-auto bg-amber-400 text-black px-6 py-3.5 rounded-2xl font-black uppercase tracking-wider text-[9px] hover:bg-amber-300 transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 shadow-xl shadow-amber-400/10 hover:shadow-amber-400/20 cursor-pointer border-0"
+                    className="w-full md:w-auto bg-amber-400 text-black px-6 py-3.5 rounded-2xl font-black uppercase tracking-wider text-[9px] hover:bg-amber-300 transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 shadow-xl shadow-amber-400/10 hover:shadow-amber-400/20 cursor-pointer"
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
                     Biometric Scan
@@ -898,11 +898,11 @@ export default function App() {
                 <button
                   onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                   className={cn(
-                    "w-14 h-8 rounded-full p-1 transition-all flex items-center cursor-pointer border-0",
+                    "w-14 h-8 rounded-full p-1 transition-all flex items-center",
                     theme === 'dark' ? "bg-amber-400 justify-end" : "bg-zinc-700 justify-start"
                   )}
                 >
-                  <div className="w-6 h-6 rounded-full bg-black animate-scale" />
+                  <div className="w-6 h-6 rounded-full bg-black" />
                 </button>
               </div>
 
@@ -932,14 +932,14 @@ export default function App() {
                     <div key={user.id} className="p-5 flex items-center justify-between group">
                       <div className="flex items-center gap-4">
                         <div className="w-10 h-10 rounded-full grayscale group-hover:grayscale-0 transition-all border border-zinc-800 overflow-hidden">
-                          <img src={user.avatar} alt={user.name} referrerPolicy="no-referrer" />
+                          <img src={user.avatar} alt={user.name} />
                         </div>
                         <div>
                           <p className="text-sm font-bold text-zinc-300">{user.name}</p>
-                          <p className="text-[10px] text-zinc-650 font-black uppercase">Blocked on May 15</p>
+                          <p className="text-[10px] text-zinc-600 font-black uppercase">Blocked on May 15</p>
                         </div>
                       </div>
-                      <button className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer border-0">
+                      <button className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all">
                         Unblock
                       </button>
                     </div>
@@ -984,7 +984,7 @@ export default function App() {
               <div className="bg-zinc-900 border border-zinc-800 rounded-[3rem] w-full max-w-sm overflow-hidden pointer-events-auto shadow-2xl relative">
                 <button 
                   onClick={() => setViewingProfile(null)}
-                  className="absolute top-6 right-6 bg-zinc-800 p-2 rounded-xl text-zinc-400 hover:text-white transition-all z-10 cursor-pointer border-0"
+                  className="absolute top-6 right-6 bg-zinc-800 p-2 rounded-xl text-zinc-400 hover:text-white transition-all z-10"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -996,7 +996,7 @@ export default function App() {
 
                 <div className="px-8 pb-8 -mt-12 relative">
                   <div className="w-24 h-24 rounded-full border-4 border-zinc-900 overflow-hidden mb-4 shadow-xl">
-                    <img src={`https://i.pravatar.cc/300?u=${viewingProfile}`} alt={viewingProfile} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={`https://i.pravatar.cc/300?u=${viewingProfile}`} alt={viewingProfile} className="w-full h-full object-cover" />
                   </div>
                   
                   <div className="flex items-center gap-2 mb-1">
@@ -1035,21 +1035,21 @@ export default function App() {
                         }
                       }}
                       className={cn(
-                        "w-full font-black py-4 rounded-2xl shadow-xl active:scale-95 transition-all uppercase tracking-widest text-xs cursor-pointer border-0",
+                        "w-full font-black py-4 rounded-2xl shadow-xl active:scale-95 transition-all uppercase tracking-widest text-xs",
                         userProfile.following.includes(viewingProfile) ? "bg-zinc-800 text-white hover:bg-zinc-700" : "bg-amber-400 text-black shadow-amber-400/20 hover:bg-amber-300"
                       )}
                     >
                       {userProfile.following.includes(viewingProfile) ? 'Following' : 'Follow Host'}
                     </button>
                     <div className="flex gap-3">
-                      <button className="flex-1 bg-zinc-800 text-white font-black py-4 rounded-2xl active:scale-95 transition-all uppercase tracking-widest text-[10px] cursor-pointer border-0">
+                      <button className="flex-1 bg-zinc-800 text-white font-black py-4 rounded-2xl active:scale-95 transition-all uppercase tracking-widest text-[10px]">
                         Send Message
                       </button>
-                      <button className="flex-1 bg-zinc-800 text-white font-black py-4 rounded-2xl active:scale-95 transition-all uppercase tracking-widest text-[10px] cursor-pointer border-0">
+                      <button className="flex-1 bg-zinc-800 text-white font-black py-4 rounded-2xl active:scale-95 transition-all uppercase tracking-widest text-[10px]">
                         Gift Support
                       </button>
                     </div>
-                    <button className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 rounded-2xl active:scale-95 transition-all uppercase tracking-widest text-[9px] border border-red-500/20 cursor-pointer">
+                    <button className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 rounded-2xl active:scale-95 transition-all uppercase tracking-widest text-[9px] border border-red-500/20">
                       Block User
                     </button>
                   </div>
@@ -1077,7 +1077,7 @@ export default function App() {
               exit={{ y: "100%" }}
               className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none"
             >
-              <div className="max-w-md mx-auto pointer-events-auto shadow-2xl">
+              <div className="max-w-md mx-auto pointer-events-auto">
                 <Gifts />
               </div>
             </motion.div>
@@ -1105,8 +1105,8 @@ export default function App() {
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={cn(
-                "w-full h-12 flex flex-col items-center justify-center gap-0.5 relative z-10 transition-all duration-300 cursor-pointer border-0 bg-transparent outline-none",
-                activeTab === item.id ? "text-black scale-110 font-bold" : "text-zinc-500 hover:text-zinc-350"
+                "w-full h-12 flex flex-col items-center justify-center gap-0.5 relative z-10 transition-all duration-300",
+                activeTab === item.id ? "text-black scale-110" : "text-zinc-500 hover:text-zinc-300"
               )}
             >
               <item.icon className={cn("w-5 h-5", activeTab === item.id ? "stroke-[3px]" : "stroke-[2px]")} />
@@ -1118,7 +1118,7 @@ export default function App() {
 
       <button 
         onClick={handleLogout}
-        className="fixed bottom-32 right-8 hidden lg:flex bg-red-650 text-white w-14 h-14 rounded-2xl items-center justify-center shadow-2xl shadow-red-600/30 z-40 cursor-pointer border-0 active:scale-95 transition-transform"
+        className="fixed bottom-32 right-8 hidden lg:flex bg-red-600 text-white w-14 h-14 rounded-2xl items-center justify-center shadow-2xl shadow-red-600/30 z-40"
       >
         <UserX className="w-8 h-8 font-black" />
       </button>
