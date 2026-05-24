@@ -1977,7 +1977,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
                     <h2 className="text-2xl font-black italic uppercase tracking-tight text-amber-400">Host Command Center</h2>
                     <p className="text-zinc-500 text-[9px] uppercase tracking-widest font-mono">Stream and Seat Moderation Panel</p>
                   </div>
-                  <RoomAnalytics room={room} seats={seats} />
+                  <RoomAnalytics roomTitle={room.title} />
                   <div className="border-t border-zinc-900 pt-6">
                     <button 
                       onClick={() => {

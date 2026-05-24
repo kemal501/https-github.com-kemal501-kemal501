@@ -19,10 +19,11 @@ import Games from './components/Games';
 import AuthForm from './components/AuthForm';
 import CreateRoomModal from './components/CreateRoomModal';
 import FaceVerification from './components/FaceVerification';
+import WorkspaceHub from './components/WorkspaceHub';
 import { cn } from './lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, where } from 'firebase/firestore';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { initAuth, logout } from './lib/auth';
 
 // --- MOCK COMPONENTS ---
 
@@ -144,6 +145,7 @@ export default function App() {
   const [showCreateRoom, setShowCreateRoom] = React.useState(false);
   const [showFaceVerification, setShowFaceVerification] = React.useState(false);
   const [rooms, setRooms] = React.useState<any[]>([]);
+  const [visibleRoomCount, setVisibleRoomCount] = React.useState(4);
   const [authReady, setAuthReady] = React.useState(false);
   const [currentUser, setCurrentUser] = React.useState<any>(null);
 
@@ -168,32 +170,33 @@ export default function App() {
 
   // Auth & Profile Sync
   React.useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = initAuth(async (user, token) => {
       setCurrentUser(user);
       setAuthReady(true);
 
-      if (user) {
-        // Sync/Create profile
-        const userRef = doc(db, 'users', user.uid);
-        try {
-          const userSnap = await getDoc(userRef);
-          if (!userSnap.exists()) {
-            await setDoc(userRef, {
-              uid: user.uid,
-              displayName: user.displayName || 'User_' + user.uid.slice(0, 5),
-              photoURL: user.photoURL || 'https://i.pravatar.cc/300',
-              role: 'user',
-              coins: 1000, // Welcome gift matching rules
-              isVerified: false,
-              createdAt: serverTimestamp(),
-              category: 'Social',
-              bio: 'New explorer on Barca-live'
-            });
-          }
-        } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+      // Sync/Create profile
+      const userRef = doc(db, 'users', user.uid);
+      try {
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) {
+          await setDoc(userRef, {
+            uid: user.uid,
+            displayName: user.displayName || 'User_' + user.uid.slice(0, 5),
+            photoURL: user.photoURL || 'https://i.pravatar.cc/300',
+            role: 'user',
+            coins: 1000, // Welcome gift matching rules
+            isVerified: false,
+            createdAt: serverTimestamp(),
+            category: 'Social',
+            bio: 'New explorer on Barca-live'
+          });
         }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
       }
+    }, () => {
+      setCurrentUser(null);
+      setAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
@@ -239,18 +242,11 @@ export default function App() {
     return () => unsub();
   }, [currentUser]);
 
-  const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
-    }
-  };
+
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      await logout();
       setViewingProfile(null);
       setActiveTab('discover');
     } catch (err) {
@@ -503,7 +499,7 @@ export default function App() {
               
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 {rooms.length > 0 ? (
-                  rooms.map((roomData, i) => (
+                  rooms.slice(0, visibleRoomCount).map((roomData, i) => (
                     <RoomCard 
                       key={roomData.id} 
                       title={roomData.title}
@@ -515,12 +511,12 @@ export default function App() {
                     />
                   ))
                 ) : (
-                  [...Array(4)].map((_, i) => {
+                  [...Array(Math.min(visibleRoomCount, 4))].map((_, i) => {
                     const roomData = {
                       id: `room_${i}`,
-                      title: ["Night Vibes 🌙", "Ethiopia Stars 🇪🇹", "Voice Party!", "Chitchat Room"][i],
-                      host: ["Abebe", "Sara", "Khalid", "Elena"][i],
-                      viewers: ["1.2K", "890", "2.4K", "150"][i],
+                      title: ["Night Vibes 🌙", "Ethiopia Stars 🇪🇹", "Voice Party!", "Chitchat Room"][i % 4],
+                      host: ["Abebe", "Sara", "Khalid", "Elena"][i % 4],
+                      viewers: ["1.2K", "890", "2.4K", "150"][i % 4],
                       type: (i % 2 === 0 ? 'video' : 'voice') as 'video' | 'voice',
                       tier: i === 0 ? 'Gold Agency' : 'Standard'
                     };
@@ -538,6 +534,16 @@ export default function App() {
                   })
                 )}
               </div>
+              {visibleRoomCount < 24 && (rooms.length > 0 ? rooms.length > visibleRoomCount : true) && (
+                <div className="flex justify-center pt-8">
+                  <button 
+                    onClick={() => setVisibleRoomCount(24)}
+                    className="text-zinc-500 hover:text-white text-[10px] font-black uppercase tracking-widest bg-zinc-900 border border-zinc-800 px-6 py-2 rounded-full transition-all"
+                  >
+                    View More Rooms
+                  </button>
+                </div>
+              )}
 
               {/* Popular Hosts Section */}
               <div className="pt-4 space-y-4">
@@ -892,6 +898,9 @@ export default function App() {
                   <div className="w-6 h-6 rounded-full bg-black" />
                 </button>
               </div>
+
+              {/* Workspace Integrations */}
+              <WorkspaceHub />
 
               {/* Admin Panel for demo */}
               <div className="space-y-6">
