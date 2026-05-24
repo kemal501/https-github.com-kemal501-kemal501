@@ -228,15 +228,20 @@ export default function App() {
     if (!currentUser) return;
     const q = firestoreQuery(
       collection(db, 'rooms'), 
-      where('isPrivate', '==', false),
-      firestoreOrderBy('createdAt', 'desc'), 
-      firestoreLimit(20)
+      firestoreLimit(100)
     );
     const unsub = onSnapshot(q, (snapshot) => {
-      const dbRooms = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })).filter((room: any) => !room.isPrivate);
+      const dbRooms = snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        .filter((room: any) => !room.isPrivate)
+        .sort((a: any, b: any) => {
+          const timeA = a.createdAt?.seconds || 0;
+          const timeB = b.createdAt?.seconds || 0;
+          return timeB - timeA;
+        });
       setRooms(dbRooms);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'rooms');
