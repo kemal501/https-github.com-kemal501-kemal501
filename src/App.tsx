@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2, ShieldCheck, Camera, Coins } from 'lucide-react';
+import { Home, Radio, Wallet as WalletIcon, User, Settings, Plus, Search, Bell, Menu, Mic, ShieldAlert, X, Slash, UserX, Shield, Trophy, Briefcase, Users, Star, Video, Music, Gamepad2, Theater, Sparkles, CheckCircle2, ShieldCheck, Camera, Coins, Smartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Wallet from './components/WalletWithdrawal';
 import RoomSettings from './components/RoomSettings';
@@ -20,6 +20,7 @@ import AuthForm from './components/AuthForm';
 import CreateRoomModal from './components/CreateRoomModal';
 import FaceVerification from './components/FaceVerification';
 import WorkspaceHub from './components/WorkspaceHub';
+import AndroidAppHub from './components/AndroidAppHub';
 import { cn } from './lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
 import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, where } from 'firebase/firestore';
@@ -129,6 +130,7 @@ const NAVIGATION = [
   { id: 'agency', icon: Briefcase, label: 'Agency' },
   { id: 'wallet', icon: WalletIcon, label: 'Wallet' },
   { id: 'games', icon: Gamepad2, label: 'Games' },
+  { id: 'android', icon: Smartphone, label: 'Android' },
   { id: 'me', icon: User, label: 'Me' },
 ];
 
@@ -939,6 +941,18 @@ export default function App() {
                   ))}
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'android' && (
+            <motion.div
+              key="android"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.05 }}
+              className="max-w-7xl mx-auto"
+            >
+              <AndroidAppHub />
             </motion.div>
           )}
         </AnimatePresence>

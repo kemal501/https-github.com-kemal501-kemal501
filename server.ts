@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { adminDb } from './src/lib/admin.ts';
 import { FieldValue } from 'firebase-admin/firestore';
 import { GoogleGenAI, Type } from "@google/genai";
+import referralRouter from "./src/lib/referralRoutes.ts";
 
 dotenv.config();
 
@@ -24,6 +25,9 @@ const ai = new GoogleGenAI({
 });
 
 // API Routes
+app.use("/api/referral", referralRouter);
+app.use("/api", referralRouter);
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
