@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { db, auth } from './firebase';
 import RoomAnalytics from './RoomAnalytics';
 import NetworkQualityDashboard from './NetworkQualityDashboard';
 import ResellerCoinSystem from './ResellerCoinSystem';

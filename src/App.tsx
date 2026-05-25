@@ -22,9 +22,9 @@ import FaceVerification from './components/FaceVerification';
 import WorkspaceHub from './components/WorkspaceHub';
 import AndroidAppHub from './components/AndroidAppHub';
 import { cn } from './lib/utils';
-import { db, auth, handleFirestoreError, OperationType } from './lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from './components/firebase';
 import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query as firestoreQuery, orderBy as firestoreOrderBy, limit as firestoreLimit, where } from 'firebase/firestore';
-import { initAuth, logout } from './lib/auth';
+import { initAuth, logout } from './components/auth';
 
 // --- MOCK COMPONENTS ---
 
@@ -136,6 +136,21 @@ const NAVIGATION = [
 
 export default function App() {
   const [activeTab, setActiveTab] = React.useState('discover');
+  const [isOnline, setIsOnline] = React.useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  React.useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const [showGiftPanel, setShowGiftPanel] = React.useState(false);
   const [isJoining, setIsJoining] = React.useState(false);
   const [activeRoom, setActiveRoom] = React.useState<{ id: string, title: string, host: string, type: 'voice' | 'video', tier?: string, [key: string]: any } | null>(null);
@@ -460,6 +475,16 @@ export default function App() {
           </h1>
         </div>
         <div className="flex items-center gap-4">
+          <div className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all shadow-md",
+            isOnline 
+              ? "bg-emerald-500/10 border-emerald-500/15 text-emerald-400 shadow-emerald-500/5" 
+              : "bg-orange-500/10 border-orange-500/15 text-orange-400 shadow-orange-500/5 cursor-help"
+          )} title={isOnline ? "All data is securely synced with Firebase Cloud database." : "You are working offline. Cache persistence keeps the platform fully functional, and queues changes to sync when connection resumes!"}>
+            <div className={cn("w-1.5 h-1.5 rounded-full", isOnline ? "bg-emerald-400 animate-pulse" : "bg-orange-500 animate-pulse")} />
+            <span>{isOnline ? "Online Sync" : "Offline Cache Mode"}</span>
+          </div>
+
           <div className="hidden sm:flex items-center gap-2 bg-zinc-900 px-4 py-2 rounded-xl border border-zinc-800 mr-2 shadow-inner">
             <Coins className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-xs font-black italic text-amber-400">

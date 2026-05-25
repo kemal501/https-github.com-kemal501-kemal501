@@ -8,8 +8,8 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { googleSignIn } from '../lib/auth';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { googleSignIn } from './auth';
 
 export default function AuthForm() {
   const [isLogin, setIsLogin] = React.useState(true);

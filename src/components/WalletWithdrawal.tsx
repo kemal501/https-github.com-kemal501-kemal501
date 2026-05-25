@@ -17,7 +17,7 @@ import {
   CalendarCheck
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { doc, updateDoc, onSnapshot, query as firestoreQuery, collection, where } from 'firebase/firestore';
 
 const CONVERSION_RATE = 1000; // 1000 coins = $1

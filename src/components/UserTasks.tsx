@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, ShieldCheck, Timer, Coins, Camera, Info, Zap, Loader2, TrendingUp, Star } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { doc, updateDoc, setDoc, serverTimestamp, increment, getDoc, collection, addDoc, onSnapshot } from 'firebase/firestore';
 import FaceVerification from './FaceVerification';
 import DailyMissions from './DailyMissions';

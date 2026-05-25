@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Coins, CheckCircle2, Flame, Trophy, Waves, MessageSquare, Loader2, Sparkles, Check, X } from 'lucide-react';
-import { db, auth } from '../lib/firebase';
+import { db, auth } from './firebase';
 import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
 
 interface Mission {

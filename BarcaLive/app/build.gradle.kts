@@ -77,5 +77,10 @@ dependencies {
     // Coil for modern image loading inside Jetpack Compose
     implementation("io.coil-kt:coil-compose:2.5.0")
 
+    // Firebase BOM & SDKs for online/offline syncing
+    implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-auth-ktx")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

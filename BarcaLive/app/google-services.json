@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "953289869545",
+    "firebase_url": "https://website-a889d-default-rtdb.firebaseio.com",
+    "project_id": "website-a889d",
+    "storage_bucket": "website-a889d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:953289869545:android:fe68911dd58967e44b4878",
+        "android_client_info": {
+          "package_name": "Com.Barcalive.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "953289869545-no5uo47bf66s8g5e97i5lfhuv3ps3n11.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyASrRnI-ga17EFZDqhDFJKgWI6t7BCwa1E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "953289869545-no5uo47bf66s8g5e97i5lfhuv3ps3n11.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "953289869545-d864lgpf0djcq6utgd35fhldq8dji0ag.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.barcalive.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
