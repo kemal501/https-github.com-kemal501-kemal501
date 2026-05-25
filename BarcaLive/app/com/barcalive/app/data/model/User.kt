@@ -11,5 +11,6 @@ data class User(
     val username: String,
     val password: String,
     val coins: Int = 20000, // New users start with welcome reward
-    val isVerified: Boolean = false
+    val isVerified: Boolean = false,
+    val kycVerified: Boolean = false
 )

@@ -1,6 +1,7 @@
 package com.barcalive.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -91,5 +92,18 @@ fun LoginScreen(navController: NavController, viewModel: BarcaViewModel = viewMo
         ) {
             Text("Login / Join Offline")
         }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "New user? Create an Account / Register",
+            color = GoldTheme,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .clickable {
+                    navController.navigate("register")
+                }
+                .padding(8.dp)
+        )
     }
 }

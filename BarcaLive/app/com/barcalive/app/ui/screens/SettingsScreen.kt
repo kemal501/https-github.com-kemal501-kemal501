@@ -2,10 +2,12 @@ package com.barcalive.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -56,6 +58,43 @@ fun SettingsScreen(navController: NavController, viewModel: BarcaViewModel = vie
                         Text(text = lang, style = MaterialTheme.typography.labelSmall)
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val autoSyncFlowValue by viewModel.isAutoSyncEnabled.collectAsState()
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SlateGrey.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Auto-Sync background data", 
+                        style = MaterialTheme.typography.titleSmall, 
+                        color = GoldTheme
+                    )
+                    Text(
+                        text = if (autoSyncFlowValue) "Live Firestore subscriptions ACTIVE" else "DISSOCIATED • Sync paused to conserve phone data",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+                }
+                
+                Switch(
+                    checked = autoSyncFlowValue,
+                    onCheckedChange = { viewModel.setAutoSyncEnabled(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = DarkBackground,
+                        checkedTrackColor = GoldTheme,
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = SlateGrey
+                    )
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

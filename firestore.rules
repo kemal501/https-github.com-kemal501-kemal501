@@ -41,7 +41,7 @@ service cloud.firestore {
           'displayName', 'photoURL', 'bio', 'category', 'isFaceVerified', 
           'faceVerifiedAt', 'agencyId', 'role', 'following', 'coins', 
           'paymentMethod', 'verificationRequest', 'minutesInRoomToday', 'lastHeatbeatDate',
-          'loginStreak', 'lastStreakClaimedDate'
+          'loginStreak', 'lastStreakClaimedDate', 'claimedMissions'
         ])
       )) || (
         // Allow others to only increment the user's coins (for gifting)
@@ -140,6 +140,13 @@ service cloud.firestore {
     match /role_change_audits/{auditId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // User reports
+    match /reports/{reportId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
       allow update, delete: if false;
     }
   }

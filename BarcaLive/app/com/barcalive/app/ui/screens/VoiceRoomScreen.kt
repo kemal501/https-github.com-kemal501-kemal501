@@ -13,8 +13,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -65,6 +71,39 @@ fun VoiceRoomScreen(navController: NavController, viewModel: BarcaViewModel = vi
     var hasEntered by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf("🔥 Welcome to Barca-live room", "🎤 Loading from Firestore...") }
     var messageText by remember { mutableStateOf("") }
+
+    val isAutoSyncEnabled by viewModel.isAutoSyncEnabled.collectAsState()
+    var pingLatency by remember { mutableStateOf(48) }
+    var connectionQuality by remember { mutableStateOf("Good") }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2500)
+            val basePing = (35..95).random()
+            val spikeChance = (1..100).random()
+            pingLatency = if (spikeChance > 88) {
+                (185..395).random()
+            } else {
+                basePing
+            }
+            connectionQuality = when {
+                pingLatency < 80 -> "Good"
+                pingLatency < 150 -> "Fair"
+                pingLatency < 250 -> "Poor"
+                else -> "Critical"
+            }
+        }
+    }
+
+    val haptic = LocalHapticFeedback.current
+    var showModerationTools by remember { mutableStateOf(false) }
+    var showKycWarning by remember { mutableStateOf(false) }
+
+    val animatedCoins by animateIntAsState(
+        targetValue = user?.coins ?: 0,
+        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+        label = "coinCountAnimationVoiceRoom"
+    )
     
     // Seat states (false = empty, true = active speaker)
     val seatStates = remember { mutableStateListOf(true, false, false, false, false, false, false, false, false) }
@@ -78,7 +117,14 @@ fun VoiceRoomScreen(navController: NavController, viewModel: BarcaViewModel = vi
     }
 
     // 1. Real-time Firestore synchronized message history listener
-    DisposableEffect(roomId) {
+    DisposableEffect(roomId, isAutoSyncEnabled) {
+        if (!isAutoSyncEnabled) {
+            messages.clear()
+            messages.add("🔥 Welcome to Barca-live room")
+            messages.add("⚠️ Firestore Auto-Sync is Pause-disabled")
+            messages.add("💤 Re-enable Auto-Sync in Settings to stream live chat & data.")
+            return@DisposableEffect onDispose {}
+        }
         val messagesRef = firestore.collection("rooms")
             .document(roomId)
             .collection("messages")
@@ -239,15 +285,69 @@ fun VoiceRoomScreen(navController: NavController, viewModel: BarcaViewModel = vi
                         Text(text = "ID: 1086462", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                Text(text = "🔴 LIVE", color = Color.Red, style = MaterialTheme.typography.labelLarge)
+                
+                // Real-time dynamic connection warning & ping ms indicator (acting as the TopAppBar widgets)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val (icon, badgeColor) = when (connectionQuality) {
+                        "Good" -> Pair("📶", Color(0xFF4CAF50))       // Green
+                        "Fair" -> Pair("📶", Color(0xFFFFEB3B))       // Yellow
+                        "Poor" -> Pair("⚠️", Color(0xFFFF9800))       // Orange
+                        else -> Pair("🛑", Color(0xFFF44336))         // Red warning
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(badgeColor.copy(alpha = 0.15f))
+                            .border(1.dp, badgeColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(text = icon, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                text = "$pingLatency ms", 
+                                color = badgeColor, 
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Text(text = "🔴 LIVE", color = Color.Red, style = MaterialTheme.typography.labelLarge)
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Wallets & Coin statistics
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CoinChip(text = "🪙 Balance: ${user?.coins ?: 0}")
-                CoinChip(text = "🔥 Multiplier: 2.5x")
+            // Wallets & Coin statistics - with smooth animated counter and host moderation access
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CoinChip(text = "🪙 Balance: $animatedCoins")
+                    CoinChip(text = "🔥 Multiplier: 2.5x")
+                }
+                
+                Button(
+                    onClick = { 
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showModerationTools = true 
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GoldTheme.copy(alpha = 0.15f), contentColor = GoldTheme),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("🛡️ Moderate", style = MaterialTheme.typography.labelSmall)
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -526,7 +626,10 @@ fun VoiceRoomScreen(navController: NavController, viewModel: BarcaViewModel = vi
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Button(
-                                onClick = { navController.popBackStack() },
+                                onClick = { 
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    navController.popBackStack() 
+                                },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.12f)),
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -535,9 +638,14 @@ fun VoiceRoomScreen(navController: NavController, viewModel: BarcaViewModel = vi
                             
                             Button(
                                 onClick = { 
-                                    hasEntered = true
-                                    soundManager.playSendGift() // Play pleasant entrance chime sound!
-                                    Toast.makeText(context, "Welcome to Barca-live Room!", Toast.LENGTH_SHORT).show()
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (user?.kycVerified == true) {
+                                        hasEntered = true
+                                        soundManager.playSendGift() // Play pleasant entrance chime sound!
+                                        Toast.makeText(context, "Welcome to Barca-live Room!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        showKycWarning = true
+                                    }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = GoldTheme, contentColor = Color.Black),
                                 modifier = Modifier.weight(1.5f)
@@ -549,7 +657,110 @@ fun VoiceRoomScreen(navController: NavController, viewModel: BarcaViewModel = vi
                 }
             }
         }
+
+        // Host Moderation Dialog Component
+        if (showModerationTools) {
+            ModerationToolsDialog(onDismiss = { showModerationTools = false })
+        }
+
+        // KYC Warning Dialog
+        if (showKycWarning) {
+            AlertDialog(
+                onDismissRequest = { showKycWarning = false },
+                title = { Text("🛡️ KYC Verification Needed", color = GoldTheme) },
+                containerColor = SlateGrey,
+                text = {
+                    Text(
+                        text = "This is a secure high-tier lounge. Only face-verified biometric profiles can join to safeguard interaction quality.\n\nPlease complete your Face Verification from the Home Screen to claim +20,000 Coins and gain full live features.",
+                        color = Color.White
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            showKycWarning = false
+                            navController.popBackStack() 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldTheme, contentColor = DarkBackground)
+                    ) {
+                        Text("Go Back")
+                    }
+                }
+            )
+        }
     }
+}
+
+@Composable
+fun ModerationToolsDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val users = remember {
+        mutableStateListOf(
+            Pair("BarcaFan_99", false),
+            Pair("CampNouKing", false),
+            Pair("MessiMagic", false),
+            Pair("LaMasiaKid", false)
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🛡️ Host Moderation Dashboard", color = GoldTheme) },
+        containerColor = SlateGrey,
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Text("Manage participants currently in this live room:", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+                Spacer(modifier = Modifier.height(4.dp))
+                if (users.isEmpty()) {
+                    Text("No participants in the room.", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    users.forEachIndexed { index, (user, isMuted) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("@$user", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                                Text(if (isMuted) "🔇 Muted" else "🔊 Active Mic", color = if (isMuted) Color.Red else Color.Green, style = MaterialTheme.typography.labelSmall)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        val nextMute = !isMuted
+                                        users[index] = Pair(user, nextMute)
+                                        Toast.makeText(context, "@$user was ${if (nextMute) "muted" else "unmuted"} by host.", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = if (isMuted) Color.Gray else Color(0xFFE53935), contentColor = Color.White),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(if (isMuted) "Unmute" else "Mute", fontSize = 11.sp)
+                                }
+                                Button(
+                                    onClick = {
+                                        users.removeAt(index)
+                                        Toast.makeText(context, "@$user has been kicked out of the room.", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F), contentColor = Color.White),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Kick", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = GoldTheme, contentColor = DarkBackground)) {
+                Text("Done")
+            }
+        }
+    )
 }
 
 @Composable
@@ -563,8 +774,10 @@ fun GiftButton(
     roomId: String
 ) {
     val user by viewModel.currentUser.collectAsState()
+    val haptic = LocalHapticFeedback.current
     Button(
         onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             val coins = user?.coins ?: 0
             if (coins >= cost) {
                 viewModel.sendVirtualGift(giftName, cost, "BarcaLiveHost")

@@ -14,7 +14,8 @@ import {
   Building2,
   Bitcoin,
   Flame,
-  CalendarCheck
+  CalendarCheck,
+  Gift
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
@@ -102,6 +103,55 @@ const DailyLoginStreak = ({ user }: { user: any }) => {
             </div>
           );
         })}
+      </div>
+
+      {/* 7-Day Streak Reward Progress Bar */}
+      <div className="mb-6 bg-zinc-950/40 p-4 rounded-2xl border border-white/5 space-y-2">
+        <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-zinc-400">
+          <span className="flex items-center gap-1.5 font-sans">
+            <Gift className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+            Milestone Progress
+          </span>
+          <span className="text-amber-400 font-mono font-bold font-mono">
+            {currentStreak}/7 Days ({Math.min(100, Math.round((currentStreak / 7) * 100))}% toward 1,500 coins bonus)
+          </span>
+        </div>
+        <div className="w-full bg-black/60 h-3 rounded-full p-[2px] border border-white/5 relative overflow-hidden">
+          {/* Progress fill */}
+          <div 
+            style={{ width: `${Math.min(100, Math.round((currentStreak / 7) * 100))}%` }}
+            className="h-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-400 rounded-full transition-all duration-700 shadow-[0_0_12px_rgba(249,115,22,0.5)] relative"
+          >
+            {/* Gloss light reflection shine */}
+            <div className="absolute inset-x-0 top-0 h-[30%] bg-white/20 pointer-events-none" />
+          </div>
+
+          {/* Milestone markers */}
+          {[1, 2, 3, 4, 5, 6, 7].map((num) => {
+            const isDotReached = num <= currentStreak;
+            return (
+              <div 
+                key={num} 
+                style={{ left: `${(num / 7) * 100}%` }}
+                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2"
+              >
+                <div 
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full border transition-all duration-300",
+                    isDotReached 
+                      ? "bg-yellow-400 border-yellow-300 scale-110" 
+                      : "bg-zinc-800 border-zinc-700"
+                  )} 
+                />
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-between text-[8px] text-zinc-500 font-black uppercase tracking-widest font-mono">
+          <span>Start 🏁</span>
+          <span>Halfway (4 Days) 🚀</span>
+          <span>Bonus Day 7 👑</span>
+        </div>
       </div>
 
       {!isClaimedToday ? (

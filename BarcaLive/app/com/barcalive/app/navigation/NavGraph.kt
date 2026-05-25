@@ -1,13 +1,15 @@
 package com.barcalive.app.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.barcalive.app.ui.screens.*
+import com.barcalive.app.viewmodel.BarcaViewModel
 
 @Composable
-fun NavGraph() {
+fun NavGraph(viewModel: BarcaViewModel = viewModel()) {
     val navController = rememberNavController()
 
     NavHost(
@@ -19,19 +21,24 @@ fun NavGraph() {
         }
 
         composable("login") {
-            LoginScreen(navController)
+            LoginScreen(navController, viewModel)
+        }
+
+        composable("register") {
+            RegisterScreen(navController, viewModel)
         }
 
         composable("home") {
-            HomeScreen(navController)
+            HomeScreen(navController, viewModel)
         }
 
         composable("rooms") {
-            VoiceRoomScreen(navController)
+            VoiceRoomScreen(navController, viewModel)
         }
 
         composable("settings") {
-            SettingsScreen(navController)
+            SettingsScreen(navController, viewModel)
         }
     }
 }
+

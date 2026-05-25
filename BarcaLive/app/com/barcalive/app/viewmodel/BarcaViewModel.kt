@@ -24,6 +24,13 @@ class BarcaViewModel(application: Application) : AndroidViewModel(application) {
     private val _loginError = MutableStateFlow<String?>(null)
     val loginError: StateFlow<String?> = _loginError.asStateFlow()
 
+    private val _isAutoSyncEnabled = MutableStateFlow(true)
+    val isAutoSyncEnabled: StateFlow<Boolean> = _isAutoSyncEnabled.asStateFlow()
+
+    fun setAutoSyncEnabled(enabled: Boolean) {
+        _isAutoSyncEnabled.value = enabled
+    }
+
     init {
         val database = AppDatabase.getDatabase(application)
         repository = BarcaRepository(
@@ -93,6 +100,37 @@ class BarcaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun registerLocally(username: String, pword: String, onFinished: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            _loginError.value = null
+            val matchedUser = repository.getUserByUsername(username)
+            if (matchedUser != null) {
+                onFinished(false, "Username/Email is already registered")
+            } else {
+                val randomCode = generateUserCode()
+                val newUser = User(
+                    userCode = randomCode,
+                    username = username,
+                    password = pword,
+                    coins = 20000
+                )
+                val idLong = repository.insertUser(newUser)
+                val createdUser = newUser.copy(id = idLong.toInt())
+                _currentUser.value = createdUser
+                
+                // Add a welcome transaction
+                repository.insertTransaction(CoinTransaction(
+                    userId = createdUser.id,
+                    amount = 20000,
+                    type = "GENERATED",
+                    paymentMethod = "Welcome Bonus",
+                    timestamp = System.currentTimeMillis()
+                ))
+                onFinished(true, null)
+            }
+        }
+    }
+
     fun logout() {
         _currentUser.value = null
     }
@@ -100,7 +138,7 @@ class BarcaViewModel(application: Application) : AndroidViewModel(application) {
     fun performFaceVerification(onSuccess: () -> Unit) {
         viewModelScope.launch {
             val user = _currentUser.value ?: return@launch
-            val updatedUser = user.copy(isVerified = true, coins = user.coins + 20000)
+            val updatedUser = user.copy(isVerified = true, kycVerified = true, coins = user.coins + 20000)
             repository.updateUser(updatedUser)
             _currentUser.value = updatedUser
 

@@ -74,7 +74,7 @@ export default function AdminPanel() {
     return () => unsub();
   }, [currentUserId]);
 
-  // Fetch users list
+  // Fetch users list from client-side Firestore
   const fetchUsers = async (force = false) => {
     const now = Date.now();
     if (!force && cachedUsers && (now - cachedUsersTime < 15000)) {
@@ -82,18 +82,20 @@ export default function AdminPanel() {
       return;
     }
     setLoadingUsers(true);
+    const path = "users";
     try {
-      const res = await fetch("/api/admin/users");
-      const data = await res.json();
-      if (data.success && data.users) {
-        cachedUsers = data.users;
-        cachedUsersTime = now;
-        setUsers(data.users);
-      } else {
-        throw new Error(data.error || "Failed to fetch platform users from backend");
-      }
+      const { collection, getDocs } = await import('firebase/firestore');
+      const snap = await getDocs(collection(db, path));
+      const loadedUsers = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      cachedUsers = loadedUsers;
+      cachedUsersTime = now;
+      setUsers(loadedUsers);
     } catch (error) {
       console.error("Failed to fetch users from backend:", error);
+      try {
+        const { handleFirestoreError, OperationType } = await import('./firebase');
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (err) {}
       if (cachedUsers) {
         setUsers(cachedUsers);
       }
@@ -102,7 +104,7 @@ export default function AdminPanel() {
     }
   };
 
-  // Fetch ledger transactions
+  // Fetch ledger transactions from client-side Firestore
   const fetchLedger = async (force = false) => {
     const now = Date.now();
     if (!force && cachedTxs && (now - cachedTxsTime < 15000)) {
@@ -110,18 +112,28 @@ export default function AdminPanel() {
       return;
     }
     setLoadingTxs(true);
+    const path = "coin_transactions";
     try {
-      const res = await fetch("/api/coin/transactions");
-      const data = await res.json();
-      if (data.success && data.transactions) {
-        cachedTxs = data.transactions;
-        cachedTxsTime = now;
-        setTransactions(data.transactions);
-      } else {
-        throw new Error(data.error || "Failed to fetch ledger transactions");
-      }
+      const { collection, getDocs, query, orderBy, limit } = await import('firebase/firestore');
+      const q = query(collection(db, path), orderBy("createdAt", "desc"), limit(40));
+      const snap = await getDocs(q);
+      const loadedTxs = snap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt && typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : data.createdAt
+        };
+      });
+      cachedTxs = loadedTxs;
+      cachedTxsTime = now;
+      setTransactions(loadedTxs);
     } catch (error) {
       console.error("Failed to fetch transactions from backend:", error);
+      try {
+        const { handleFirestoreError, OperationType } = await import('./firebase');
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (err) {}
       if (cachedTxs) {
         setTransactions(cachedTxs);
       }
@@ -132,16 +144,26 @@ export default function AdminPanel() {
 
   const fetchAudits = async () => {
     setLoadingAudits(true);
+    const path = "role_change_audits";
     try {
-      const res = await fetch("/api/admin/role-audits");
-      const data = await res.json();
-      if (data.success && data.audits) {
-        setAudits(data.audits);
-      } else {
-        throw new Error(data.error || "Failed to fetch role audits");
-      }
+      const { collection, getDocs, query, orderBy, limit } = await import('firebase/firestore');
+      const q = query(collection(db, path), orderBy("createdAt", "desc"), limit(100));
+      const snap = await getDocs(q);
+      const loadedAudits = snap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt && typeof data.createdAt.toDate === "function" ? data.createdAt.toDate() : data.createdAt
+        };
+      });
+      setAudits(loadedAudits);
     } catch (error) {
       console.error("Failed to fetch role audits from backend:", error);
+      try {
+        const { handleFirestoreError, OperationType } = await import('./firebase');
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (err) {}
     } finally {
       setLoadingAudits(false);
     }
@@ -159,90 +181,129 @@ export default function AdminPanel() {
   const syncDatabaseRole = async (targetRole: 'admin' | 'seller' | 'user') => {
     if (!currentUserId) return;
     setIsSubmitting(true);
+    const path = `users/${currentUserId}`;
     try {
-      const res = await fetch("/api/admin/update-role", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: currentUserId,
-          role: targetRole,
-          changedById: currentUserId
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSimulatedRole(targetRole);
-        setActiveTab(targetRole === 'admin' ? 'admin' : 'seller');
-        fetchUsers(true);
-        fetchAudits();
-      } else {
-        throw new Error(data.error || "Failed to sync role");
+      const { doc, updateDoc, collection, addDoc, serverTimestamp, getDoc } = await import('firebase/firestore');
+      const targetRef = doc(db, "users", currentUserId);
+      const targetSnap = await getDoc(targetRef);
+      let oldRole = "user";
+      let targetUserName = currentUserId;
+      if (targetSnap.exists()) {
+        const targetData = targetSnap.data();
+        oldRole = targetData.role || "user";
+        targetUserName = targetData.displayName || targetData.email || currentUserId;
       }
+
+      await updateDoc(targetRef, { role: targetRole });
+
+      // Save audit log client-side directly
+      await addDoc(collection(db, "role_change_audits"), {
+        changedById: currentUserId,
+        changedByName: myProfile?.displayName || myProfile?.email || "System/Anonymous",
+        targetUserId: currentUserId,
+        targetUserName,
+        oldRole,
+        newRole: targetRole,
+        createdAt: serverTimestamp()
+      });
+
+      setSimulatedRole(targetRole);
+      setActiveTab(targetRole === 'admin' ? 'admin' : 'seller');
+      fetchUsers(true);
+      fetchAudits();
     } catch (error) {
       console.error("Error setting role in DB:", error);
+      try {
+        const { handleFirestoreError, OperationType } = await import('./firebase');
+        handleFirestoreError(error, OperationType.UPDATE, path);
+      } catch (err) {}
       alert(error instanceof Error ? error.message : "Error setting role");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Change user role
+  // Change user role from client-side directly
   const handleUpdateUserRole = async (userId: string, newRole: string) => {
+    const path = `users/${userId}`;
     try {
-      const res = await fetch("/api/admin/update-role", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId,
-          role: newRole,
-          changedById: currentUserId
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (userId === currentUserId) {
-          setSimulatedRole(newRole as any);
-        }
-        fetchUsers(true);
-        fetchAudits();
-      } else {
-        throw new Error(data.error || "Failed to update role");
+      const { doc, updateDoc, collection, addDoc, serverTimestamp, getDoc } = await import('firebase/firestore');
+      const targetRef = doc(db, "users", userId);
+      const targetSnap = await getDoc(targetRef);
+      let oldRole = "user";
+      let targetUserName = userId;
+      if (targetSnap.exists()) {
+        const targetData = targetSnap.data();
+        oldRole = targetData.role || "user";
+        targetUserName = targetData.displayName || targetData.email || userId;
       }
+
+      await updateDoc(targetRef, { role: newRole });
+
+      // Save audit log client-side directly
+      await addDoc(collection(db, "role_change_audits"), {
+        changedById: currentUserId || 'system',
+        changedByName: myProfile?.displayName || myProfile?.email || "System/Anonymous",
+        targetUserId: userId,
+        targetUserName,
+        oldRole,
+        newRole,
+        createdAt: serverTimestamp()
+      });
+
+      if (userId === currentUserId) {
+        setSimulatedRole(newRole as any);
+      }
+      fetchUsers(true);
+      fetchAudits();
     } catch (error) {
       console.error("Failed to change user role:", error);
+      try {
+        const { handleFirestoreError, OperationType } = await import('./firebase');
+        handleFirestoreError(error, OperationType.UPDATE, path);
+      } catch (err) {}
       alert(error instanceof Error ? error.message : "Error changing user role");
     }
   };
 
-  // Admin Coin Minting submit
+  // Admin Coin Minting submit from client-side directly
   const handleMintCoins = async () => {
     if (!selectedMintUser || !mintAmount) return;
     setIsSubmitting(true);
+    const amount = parseInt(mintAmount);
+    const path = `users/${selectedMintUser.id}`;
     try {
-      const amount = parseInt(mintAmount);
-      const res = await fetch("/api/admin/generate-coins", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: selectedMintUser.id,
-          amount,
-          reason: mintReason || "Admin Minting",
-          adminSecret: "TEMPORARY_SECRET"
-        })
+      const { doc, updateDoc, increment, collection, addDoc } = await import('firebase/firestore');
+      const userRef = doc(db, "users", selectedMintUser.id);
+      
+      await updateDoc(userRef, {
+        coins: increment(amount)
       });
-      const data = await res.json();
-      if (data.success) {
-        alert(`Success: Forged & Synced ${amount.toLocaleString()} coins for ${selectedMintUser.displayName}`);
-        setMintAmount('');
-        setMintReason('');
-        setSelectedMintUser(null);
-        fetchUsers(true);
-        fetchLedger(true);
-      } else {
-        throw new Error(data.error || "Failed to generate coins from server");
-      }
+      
+      // Log the action to unified coin transactions
+      const txLog = {
+        type: "admin_mint",
+        targetUserId: selectedMintUser.id,
+        targetUserName: selectedMintUser.displayName || "Platform User",
+        amount,
+        reason: mintReason || "Admin Generation",
+        createdAt: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, "coin_transactions"), txLog);
+
+      alert(`Success: Forged & Synced ${amount.toLocaleString()} coins for ${selectedMintUser.displayName}`);
+      setMintAmount('');
+      setMintReason('');
+      setSelectedMintUser(null);
+      fetchUsers(true);
+      fetchLedger(true);
     } catch (error) {
-      console.error("Failed to mint coins via API:", error);
+      console.error("Failed to mint coins via Client-Side:", error);
+      try {
+        const { handleFirestoreError, OperationType } = await import('./firebase');
+        handleFirestoreError(error, OperationType.UPDATE, path);
+      } catch (err) {}
       alert(`Error minting: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsSubmitting(false);

@@ -24,6 +24,40 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const [newMsg, setNewMsg] = useState('');
   const [likesCount, setLikesCount] = useState(0);
   const [showGifting, setShowGifting] = useState(false);
+  const [floatingGifts, setFloatingGifts] = useState<{ id: string, icon: string }[]>([]);
+  const [showListeners, setShowListeners] = useState(false);
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
+
+  const [ping, setPing] = useState(48);
+  const [connectionQuality, setConnectionQuality] = useState<'Good' | 'Fair' | 'Poor' | 'Critical'>('Good');
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const basePing = Math.floor(Math.random() * 55) + 32;
+      const spike = Math.random() > 0.88 ? Math.floor(Math.random() * 190) + 110 : 0;
+      const currentPing = basePing + spike;
+      setPing(currentPing);
+      if (currentPing < 80) setConnectionQuality('Good');
+      else if (currentPing < 140) setConnectionQuality('Fair');
+      else if (currentPing < 210) setConnectionQuality('Poor');
+      else setConnectionQuality('Critical');
+    }, 2500);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setShowCopiedToast(true);
+    setTimeout(() => setShowCopiedToast(false), 2000);
+  };
+
+  const handleTriggerFloatingGift = (icon: string) => {
+    const id = Math.random().toString();
+    setFloatingGifts(prev => [...prev, { id, icon }]);
+    setTimeout(() => {
+      setFloatingGifts(prev => prev.filter(g => g.id !== id));
+    }, 2200);
+  };
   
   // Custom stage seat speakers
   const [speakers, setSpeakers] = useState<string[]>([
@@ -64,10 +98,27 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[120] bg-zinc-950 flex flex-col justify-between overflow-hidden">
+    <motion.div 
+      initial={{ opacity: 0, y: 50 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      exit={{ opacity: 0, y: 50 }}
+      className="fixed inset-0 z-[120] bg-zinc-950 flex flex-col justify-between overflow-hidden"
+    >
       {/* Background Ambience Glows */}
       <div className="absolute top-10 left-12 w-64 h-64 rounded-full bg-blue-600/15 blur-[100px] pointer-events-none" />
       <div className="absolute bottom-10 right-12 w-64 h-64 rounded-full bg-amber-400/10 blur-[100px] pointer-events-none" />
+
+      {/* Share Toast */}
+      {showCopiedToast && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          className="fixed top-20 z-[300] left-1/2 -translate-x-1/2 bg-emerald-500 text-white px-4 py-2 rounded-full text-xs font-black"
+        >
+          Link Copied!
+        </motion.div>
+      )}
 
       {/* Header Panel */}
       <div className="bg-black/40 backdrop-blur-md border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
@@ -82,10 +133,33 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 bg-black/50 border border-white/5 px-3 py-1.5 rounded-full font-mono text-zinc-400 text-[10px] font-bold">
-            <Users className="w-3.5 h-3.5 text-amber-400" />
-            <span>{room.viewers || '420'}</span>
+          {/* Connection quality warning & ping reading badge */}
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[9px] font-mono font-black tracking-tight ${
+            connectionQuality === 'Good'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              : connectionQuality === 'Fair'
+                ? 'bg-yellow-500/12 border-yellow-550/20 text-yellow-500'
+                : connectionQuality === 'Poor'
+                  ? 'bg-orange-500/12 border-orange-550/20 text-orange-400'
+                  : 'bg-red-500/15 border-red-500/35 text-red-400 animate-pulse'
+          }`}>
+            <span className="text-[11px] leading-none">
+              {connectionQuality === 'Good' || connectionQuality === 'Fair' ? '📶' : '⚠️'}
+            </span>
+            <span>{ping} MS</span>
           </div>
+
+          <div className="flex items-center gap-1.5 bg-black/50 border border-white/5 px-3 py-1.5 rounded-full font-mono text-zinc-400 text-[10px] font-bold">
+            <Users className="w-3.5 h-3.5 text-amber-400 cursor-pointer hover:text-amber-300" onClick={() => setShowListeners(true)} />
+            <span className="cursor-pointer" onClick={() => setShowListeners(true)}>{room.viewers || '420'}</span>
+          </div>
+
+          <button 
+            onClick={handleShare}
+            className="text-zinc-400 hover:text-white p-2 border-0 bg-transparent cursor-pointer"
+          >
+            <Share2 className="w-4 h-4" />
+          </button>
 
           <button 
             onClick={onLeave}
@@ -95,6 +169,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
           </button>
         </div>
       </div>
+
 
       {/* Main Grid View */}
       <div className="flex-1 overflow-y-auto no-scrollbar p-6 grid lg:grid-cols-12 gap-6 z-10">
@@ -206,6 +281,37 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
         </div>
       </div>
 
+      {/* Active Listeners Modal */}
+      <AnimatePresence>
+        {showListeners && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+            <div onClick={() => setShowListeners(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-zinc-900 border border-white/10 p-6 rounded-[2rem] w-full max-w-sm relative z-10"
+            >
+              <h3 className="text-white font-black uppercase text-sm mb-4">Active Listeners</h3>
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                {[...speakers, 'Guest_1', 'Guest_2', 'Ethio_Fan'].map((user, i) => (
+                  <div key={i} className="flex items-center justify-between bg-black/40 p-3 rounded-xl border border-white/5">
+                    <span className="text-zinc-300 font-bold text-xs">@{user}</span>
+                    <button className="text-[9px] bg-red-950/50 text-red-400 px-2 py-1 rounded border border-red-900/50">Mute</button>
+                  </div>
+                ))}
+              </div>
+              <button 
+                onClick={() => setShowListeners(false)}
+                className="w-full mt-4 bg-zinc-800 text-white py-2 rounded-xl text-xs font-bold"
+              >
+                Close
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Gift presentation drawer overlay */}
       <AnimatePresence>
         {showGifting && (
@@ -213,7 +319,7 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
             <div onClick={() => setShowGifting(false)} className="absolute inset-0 bg-black/70 backdrop-blur-xs" />
             <div className="absolute bottom-0 left-0 right-0 max-w-md mx-auto z-10">
               <div className="bg-zinc-950 border-t border-white/10 rounded-t-[3.5rem] p-2 relative overflow-hidden">
-                <Gifts />
+                <Gifts onGiftSent={handleTriggerFloatingGift} />
                 <button 
                   onClick={() => setShowGifting(false)}
                   className="absolute top-6 right-6 p-2 bg-zinc-900 border border-white/5 rounded-full text-zinc-400 hover:text-white transition-colors cursor-pointer"
@@ -225,6 +331,43 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
           </div>
         )}
       </AnimatePresence>
-    </div>
+
+      {/* Floating Gifts Overlay - moves chosen icons from simulated avatar/controls point to viewport center */}
+      <div className="absolute inset-0 pointer-events-none z-[250] overflow-hidden">
+        <AnimatePresence>
+          {floatingGifts.map((gift) => (
+            <motion.div
+              key={gift.id}
+              initial={{ 
+                x: window.innerWidth > 768 ? '35%' : '15%', 
+                y: '40%', 
+                scale: 0.1, 
+                opacity: 0,
+                rotate: 0 
+              }}
+              animate={{ 
+                x: '0%', 
+                y: '0%', 
+                scale: [0.1, 2.5, 4.2, 3.2], 
+                opacity: [0, 1, 1, 0],
+                rotate: [0, 15, -15, 360],
+              }}
+              exit={{ opacity: 0 }}
+              transition={{ 
+                duration: 2.3, 
+                ease: "easeOut"
+              }}
+              className="absolute left-[54%] top-[50%] -translate-x-1/2 -translate-y-1/2 text-7xl filter drop-shadow-[0_12px_30px_rgba(245,158,11,0.65)] flex items-center justify-center pointer-events-none"
+            >
+              <div className="relative pointer-events-none flex items-center justify-center">
+                <span className="text-8xl">{gift.icon}</span>
+                {/* Glow ring backing */}
+                <span className="absolute w-24 h-24 bg-amber-400/20 rounded-full blur-xl -z-10 animate-ping" />
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+      </motion.div>
   );
 }

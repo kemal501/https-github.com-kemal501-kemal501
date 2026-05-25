@@ -136,6 +136,21 @@ const NAVIGATION = [
 
 export default function App() {
   const [activeTab, setActiveTab] = React.useState('discover');
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = React.useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('isAutoSyncEnabled');
+      return saved === null ? true : saved === 'true';
+    }
+    return true;
+  });
+
+  const handleToggleAutoSync = () => {
+    setIsAutoSyncEnabled(prev => {
+      const newVal = !prev;
+      localStorage.setItem('isAutoSyncEnabled', String(newVal));
+      return newVal;
+    });
+  };
   const [isOnline, setIsOnline] = React.useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   React.useEffect(() => {
@@ -220,6 +235,7 @@ export default function App() {
 
   React.useEffect(() => {
     if (!currentUser) return;
+    if (!isAutoSyncEnabled) return;
     const unsub = onSnapshot(doc(db, 'users', currentUser.uid), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -236,11 +252,12 @@ export default function App() {
       handleFirestoreError(error, OperationType.GET, `users/${currentUser?.uid}`);
     });
     return () => unsub();
-  }, [currentUser]);
+  }, [currentUser, isAutoSyncEnabled]);
 
   // Sync Rooms from Firestore
   React.useEffect(() => {
     if (!currentUser) return;
+    if (!isAutoSyncEnabled) return;
     const q = firestoreQuery(
       collection(db, 'rooms'), 
       firestoreLimit(100)
@@ -262,7 +279,7 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'rooms');
     });
     return () => unsub();
-  }, [currentUser]);
+  }, [currentUser, isAutoSyncEnabled]);
 
 
 
@@ -289,6 +306,7 @@ export default function App() {
   // Sync popular hosts verified status from DB
   React.useEffect(() => {
     if (!currentUser) return;
+    if (!isAutoSyncEnabled) return;
     const unsub = onSnapshot(
       firestoreQuery(collection(db, 'users'), where('isVerified', '==', true)), 
       (snapshot) => {
@@ -304,7 +322,7 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'users');
     });
     return () => unsub();
-  }, [currentUser]);
+  }, [currentUser, isAutoSyncEnabled]);
 
   const categories = [
     { name: 'All', icon: Sparkles },
@@ -925,6 +943,25 @@ export default function App() {
                   className={cn(
                     "w-14 h-8 rounded-full p-1 transition-all flex items-center cursor-pointer border-0",
                     theme === 'dark' ? "bg-amber-400 justify-end" : "bg-zinc-700 justify-start"
+                  )}
+                >
+                  <div className="w-6 h-6 rounded-full bg-black animate-scale" />
+                </button>
+              </div>
+
+              {/* Firestore Auto-Sync Toggle Settings */}
+              <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-[2.5rem] flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-black uppercase text-sm">Firestore Auto-Sync</h3>
+                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mt-0.5">
+                    {isAutoSyncEnabled ? '⚡ Active (Full Real-Time Streaming)' : '💤 Paused (Offline/Limited Bandwidth Mode)'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleToggleAutoSync}
+                  className={cn(
+                    "w-14 h-8 rounded-full p-1 transition-all flex items-center cursor-pointer border-0",
+                    isAutoSyncEnabled ? "bg-emerald-400 justify-end" : "bg-zinc-700 justify-start"
                   )}
                 >
                   <div className="w-6 h-6 rounded-full bg-black animate-scale" />

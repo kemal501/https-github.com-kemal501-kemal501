@@ -55,6 +55,7 @@ export default function Gifts({ onGiftSent }: GiftsProps) {
   const handleSendGift = async () => {
     if (!selectedGift) return;
     setErrorMsg('');
+    setSuccessMsg('');
     
     if (coinsBalance < selectedGift.cost) {
       setErrorMsg('Insufficient Coins balance. Visit the coin vault.');
@@ -84,6 +85,8 @@ export default function Gifts({ onGiftSent }: GiftsProps) {
       setSending(false);
     }
   };
+
+  const [successMsg, setSuccessMsg] = useState('');
 
   return (
     <div className="bg-zinc-950 border-t border-white/10 rounded-t-[3.5rem] p-6 text-left space-y-6 pb-12 w-full max-w-md mx-auto">

@@ -172,9 +172,26 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["changedById", "changedByName", "targetUserId", "targetUserName", "oldRole", "newRole"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Log entry tracking user reports for moderation.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "targetId": { "type": "string" },
+        "reason": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["reporterId", "targetId", "reason", "timestamp"]
     }
   },
   "firestore": {
+    "reports/{reportId}": {
+      "schema": "Report",
+      "description": "User reports submitted for moderation."
+    },
     "role_change_audits/{auditId}": {
       "schema": "RoleChangeAudit",
       "description": "Role change audit trails."

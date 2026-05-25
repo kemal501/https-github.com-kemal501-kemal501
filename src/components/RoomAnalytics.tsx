@@ -4,6 +4,32 @@ import { ArrowUpRight, BarChart3, Users, Volume2, ShieldCheck, Zap } from 'lucid
 
 export default function RoomAnalytics({ roomTitle }: { roomTitle: string }) {
   const [data, setData] = useState<any[]>([]);
+  const [totalCoins, setTotalCoins] = useState(2450);
+  const [sessionSeconds, setSessionSeconds] = useState(1450); // initial start at ~24 mins
+  const [projectionGoal, setProjectionGoal] = useState(10000); // 10k target Coins/Hr
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSessionSeconds((prev) => prev + 1);
+      // Organic simulation of interactive tips during analytics inspection!
+      if (Math.random() > 0.65) {
+        const giftOptions = [10, 50, 200, 500, 1500];
+        const choice = giftOptions[Math.floor(Math.random() * giftOptions.length)];
+        setTotalCoins((prev) => prev + choice);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDuration = (totalSecs: number) => {
+    const hrs = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const revenuePerHour = sessionSeconds > 0 ? Math.round((totalCoins * 3600) / sessionSeconds) : 0;
+  const progressToGoal = Math.min(100, Math.round((revenuePerHour / projectionGoal) * 100));
 
   useEffect(() => {
     // Generate beautiful real-time data ticks for viewer peaks
@@ -82,6 +108,66 @@ export default function RoomAnalytics({ roomTitle }: { roomTitle: string }) {
               <Area type="monotone" dataKey="viewers" stroke="#3b82f6" fillOpacity={1} fill="url(#colorAudience)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Real-time Revenue per Hour Calculator for Hosts */}
+      <div className="bg-gradient-to-r from-zinc-900 to-black border border-amber-450/20 rounded-[2rem] p-5 space-y-4">
+        <div className="flex md:flex-row flex-col justify-between items-start md:items-center gap-3 text-left">
+          <div className="text-left">
+            <h4 className="text-white font-black uppercase text-xs tracking-wider flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-ping" />
+              Sovereign Broadcast Revenue Monitor
+            </h4>
+            <p className="text-zinc-500 text-[9px] font-bold uppercase tracking-widest mt-0.5">
+              Live calculated session payout speed representation for host accounts
+            </p>
+          </div>
+          <div className="bg-black/50 border border-white/5 py-1.5 px-3 rounded-full font-mono text-[10px] text-zinc-400 font-bold flex gap-2">
+            <span>Uptime:</span>
+            <span className="text-amber-450 font-black">{formatDuration(sessionSeconds)}</span>
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-3 gap-4 text-left">
+          <div className="bg-black/40 border border-white/5 p-4 rounded-xl flex flex-col justify-center">
+            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-wider">Gross Tips Recalled</span>
+            <span className="text-lg font-black text-white font-mono mt-1">🪙 {totalCoins.toLocaleString()} <span className="text-[9px] text-zinc-500 font-bold uppercase ml-0.5">Coins</span></span>
+          </div>
+
+          <div className="bg-amber-450/5 border border-amber-450/10 p-4 rounded-xl flex flex-col justify-center">
+            <span className="text-[8px] font-black text-amber-450 uppercase tracking-wider">Revenue per Hour</span>
+            <span className="text-lg font-black text-amber-455 font-mono mt-1">🪙 {revenuePerHour.toLocaleString()} <span className="text-[9px] text-amber-500 font-bold uppercase ml-0.5">Coins/Hr</span></span>
+          </div>
+
+          <div className="bg-black/40 border border-white/5 p-4 rounded-xl flex flex-col justify-center space-y-1">
+            <div className="flex justify-between items-center">
+              <span className="text-[8px] font-black text-zinc-500 uppercase tracking-wider font-sans">Target Objective Rate</span>
+              <span className="text-[10px] text-zinc-400 font-mono font-bold">{projectionGoal.toLocaleString()}</span>
+            </div>
+            <input 
+              type="range"
+              min="2000"
+              max="30000"
+              step="1000"
+              value={projectionGoal}
+              onChange={(e) => setProjectionGoal(parseInt(e.target.value))}
+              className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-400 outline-none mt-1"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1 block text-left">
+          <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider text-zinc-400">
+            <span>Target Velocity Goal Reach</span>
+            <span className="text-amber-450 font-mono">{progressToGoal}%</span>
+          </div>
+          <div className="w-full bg-zinc-950 h-2 rounded-full overflow-hidden p-[1px] border border-white/5">
+            <div 
+              style={{ width: `${progressToGoal}%` }}
+              className="h-full bg-gradient-to-r from-amber-400 to-yellow-350 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]"
+            />
+          </div>
         </div>
       </div>
     </div>
