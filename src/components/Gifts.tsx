@@ -26,9 +26,10 @@ const GIFT_LIST: GiftItem[] = [
 
 interface GiftsProps {
   onGiftSent?: (icon: string) => void;
+  onClose?: () => void;
 }
 
-export default function Gifts({ onGiftSent }: GiftsProps) {
+export default function Gifts({ onGiftSent, onClose }: GiftsProps) {
   const [selectedGift, setSelectedGift] = useState<GiftItem | null>(null);
   const [coinsBalance, setCoinsBalance] = useState(0);
   const [sending, setSending] = useState(false);
@@ -86,18 +87,29 @@ export default function Gifts({ onGiftSent }: GiftsProps) {
   };
 
   return (
-    <div className="bg-zinc-950 border-t border-white/10 rounded-t-[3.5rem] p-6 text-left space-y-6 pb-12 w-full max-w-md mx-auto">
-      <div className="flex justify-between items-center px-2">
-        <div className="flex items-center gap-2">
-          <Gift className="w-5 h-5 text-amber-400 animate-pulse" />
-          <h3 className="text-white font-black uppercase italic tracking-tighter text-base">Select Broadcaster Gift</h3>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[250] flex flex-col justify-end">
+      <div className="bg-zinc-950 border-t border-white/10 rounded-t-[3.5rem] p-6 text-left space-y-6 pb-12 w-full max-w-md mx-auto relative shadow-2xl">
+        <div className="flex justify-between items-center px-1">
+          <div className="flex items-center gap-2">
+            <Gift className="w-5 h-5 text-amber-400 animate-pulse" />
+            <h3 className="text-white font-black uppercase italic tracking-tighter text-base">Select Broadcaster Gift</h3>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 bg-black/60 px-3 py-1.5 rounded-full border border-white/5 font-mono">
+              <Coins className="w-4 h-4 text-amber-400" />
+              <span className="text-amber-450 text-xs font-black">{coinsBalance.toLocaleString()}</span>
+            </div>
+            {onClose && (
+              <button 
+                onClick={onClose}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-zinc-400 hover:text-white border-0 cursor-pointer"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
-        
-        <div className="flex items-center gap-1.5 bg-black/60 px-3 py-1.5 rounded-full border border-white/5 font-mono">
-          <Coins className="w-4 h-4 text-amber-400" />
-          <span className="text-amber-450 text-xs font-black">{coinsBalance.toLocaleString()}</span>
-        </div>
-      </div>
 
       <div className="grid grid-cols-4 gap-3 max-h-[240px] overflow-y-auto no-scrollbar py-2">
         {GIFT_LIST.map((gift) => {
@@ -159,6 +171,7 @@ export default function Gifts({ onGiftSent }: GiftsProps) {
           Choose a gift token to engage broadcaster
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { adminDb } from './src/lib/admin.ts';
 import { FieldValue } from 'firebase-admin/firestore';
 import { GoogleGenAI, Type } from "@google/genai";
 import referralRouter from "./src/lib/referralRoutes.ts";
+import { RtcTokenBuilder, RtcRole } from 'agora-access-token';
 
 dotenv.config();
 
@@ -30,6 +31,30 @@ app.use("/api", referralRouter);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+app.get("/api/agora-config", (req, res) => {
+  res.json({ appId: process.env.AGORA_APP_ID });
+});
+
+app.get("/api/agora-token", (req, res) => {
+  const channelName = req.query.channelName as string;
+  if (!channelName) return res.status(400).json({ error: "channelName required" });
+  
+  if (!process.env.AGORA_APP_ID || !process.env.AGORA_CERTIFICATE) {
+      return res.status(500).json({ error: "Agora credentials not configured" });
+  }
+
+  const token = RtcTokenBuilder.buildTokenWithUid(
+    process.env.AGORA_APP_ID,
+    process.env.AGORA_CERTIFICATE,
+    channelName,
+    0, // uid
+    RtcRole.PUBLISHER,
+    Math.floor(Date.now() / 1000) + 3600
+  );
+
+  res.json({ token });
 });
 
 // User profile retrieval

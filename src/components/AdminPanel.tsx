@@ -35,6 +35,7 @@ export default function AdminPanel() {
   // Directory & ledgers
   const [users, setUsers] = React.useState<any[]>([]);
   const [transactions, setTransactions] = React.useState<any[]>([]);
+  const [withdrawals, setWithdrawals] = React.useState<any[]>([]); // New state
   const [audits, setAudits] = React.useState<any[]>([]);
   const [searchQuery, setSearchQuery] = React.useState('');
   
@@ -142,6 +143,46 @@ export default function AdminPanel() {
     }
   };
 
+  const fetchWithdrawals = async () => {
+    setLoadingTxs(true);
+    const path = "withdrawals";
+    try {
+      const { collection, getDocs, query, where } = await import('firebase/firestore');
+      const q = query(collection(db, path), where("status", "==", "pending"));
+      const snap = await getDocs(q);
+      const loadedWithdrawals = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setWithdrawals(loadedWithdrawals);
+    } catch (error) {
+      console.error("Failed to fetch withdrawals:", error);
+    } finally {
+      setLoadingTxs(false);
+    }
+  };
+
+  const approveWithdrawal = async (withdrawId: string, userId: string, amount: number) => {
+    setIsSubmitting(true);
+    try {
+      const { doc, runTransaction, increment } = await import('firebase/firestore');
+      const userRef = doc(db, 'users', userId);
+      const withdrawalRef = doc(db, 'withdrawals', withdrawId);
+
+      await runTransaction(db, async (transaction) => {
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists()) throw new Error("User does not exist");
+
+        transaction.update(userRef, { coins: increment(-amount) });
+        transaction.update(withdrawalRef, { status: 'completed' });
+      });
+
+      fetchWithdrawals();
+      fetchLedger(true);
+    } catch (error) {
+       console.error("Failed to approve:", error);
+       alert(`Failed to approve: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const fetchAudits = async () => {
     setLoadingAudits(true);
     const path = "role_change_audits";
@@ -174,6 +215,7 @@ export default function AdminPanel() {
       fetchUsers();
       fetchLedger();
       fetchAudits();
+      fetchWithdrawals();
     }
   }, [currentUserId]);
 
@@ -708,6 +750,54 @@ export default function AdminPanel() {
                     {isSubmitting ? "Generating Assets..." : "Execute & Mint Coins"}
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* Pending Withdrawals */}
+            <div className="bg-zinc-900/40 border border-zinc-850 p-6 rounded-[2rem] space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-zinc-800 p-1.5 rounded-lg">
+                    <ArrowRightLeft className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-black uppercase text-xs">Pending Withdrawals</h3>
+                    <p className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest">Approve requested payouts</p>
+                  </div>
+                </div>
+              </div>
+              <div className="overflow-x-auto border border-zinc-850 rounded-xl bg-zinc-950">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-900 bg-zinc-900/40 text-[9px] text-zinc-500 font-black uppercase tracking-wider">
+                      <th className="px-4 py-3">User</th>
+                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-900/50">
+                    {withdrawals.map((w: any) => (
+                      <motion.tr 
+                        key={w.id} 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="hover:bg-zinc-900/40 border-zinc-900/50 transition-colors"
+                      >
+                        <td className="px-4 py-3.5 text-zinc-300 font-bold">{w.userName || 'Anonymous'}</td>
+                        <td className="px-4 py-3.5 font-mono text-amber-400 font-bold">{w.amount} COINS</td>
+                        <td className="px-4 py-3.5 text-right">
+                          <button
+                            onClick={() => approveWithdrawal(w.id, w.userId, w.amount)}
+                            disabled={isSubmitting}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-3 py-1.5 rounded-lg text-[9px] uppercase tracking-wider transition-all disabled:opacity-50"
+                          >
+                            Approve
+                          </button>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
 

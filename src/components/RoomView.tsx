@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Mic, MicOff, Camera, VideoOff, Users, Heart, Share2, Send, HelpCircle, Gift } from 'lucide-react';
-import { db, auth } from './firebase';
-import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { collection, addDoc, serverTimestamp, onSnapshot, query, orderBy } from 'firebase/firestore';
 import Gifts from './Gifts';
+import AgoraRTC, { IAgoraRTCClient, ILocalAudioTrack } from 'agora-rtc-sdk-ng';
 
 interface RoomViewProps {
   room: {
@@ -18,18 +19,163 @@ interface RoomViewProps {
 }
 
 export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
-  const [micActive, setMicActive] = useState(true);
+  const [micActive, setMicActive] = useState(false);
   const [videoActive, setVideoActive] = useState(false);
-  const [messages, setMessages] = useState<{ id: string, sender: string, text: string }[]>([]);
+  const [chatMessages, setChatMessages] = useState<{ id: string, sender: string, text: string, timestamp: Date }[]>([]);
+  const [remoteEvents, setRemoteEvents] = useState<{ id: string, sender: string, text: string, timestamp: Date }[]>([]);
   const [newMsg, setNewMsg] = useState('');
   const [likesCount, setLikesCount] = useState(0);
   const [showGifting, setShowGifting] = useState(false);
   const [floatingGifts, setFloatingGifts] = useState<{ id: string, icon: string }[]>([]);
   const [showListeners, setShowListeners] = useState(false);
+  const [showRules, setShowRules] = useState(false);
   const [showCopiedToast, setShowCopiedToast] = useState(false);
+  
+  // Tab/Left-Menu States
+  const [activeTab, setActiveTab] = useState<'All' | 'Room' | 'Chat'>('Room');
+  const [showChatPanel, setShowChatPanel] = useState(true);
+
+  // Dynamic user seat map
+  const [speakers, setSpeakers] = useState<(string | null)[]>([
+    room.host, // Seat 1 (Host)
+    'Zekarias_Abebe', // Seat 2 (VIP)
+    'Bethel_S', // Seat 3 (VIP)
+    'Alem_Ethio', // Seat 4 (VIP)
+    null, // Seat 5
+    null, // Seat 6
+    null, // Seat 7
+    null, // Seat 8
+    null  // Seat 9
+  ]);
+
+  // Handle joining/leaving seats and logging activities
+  const handleSeatClick = (index: number) => {
+    const currentUserName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Guest_User';
+    const userId = auth.currentUser?.uid || '1068462';
+    const eventsRef = collection(db, 'rooms', room.id, 'events');
+
+    setSpeakers(prev => {
+      const next = [...prev];
+      if (next[index] === currentUserName) {
+        next[index] = null; // Leave seat
+
+        // Log seat-leave event persistently
+        addDoc(eventsRef, {
+          userId,
+          userName: currentUserName,
+          type: 'seat-leave',
+          timestamp: serverTimestamp()
+        }).catch(err => {
+          handleFirestoreError(err, OperationType.CREATE, `rooms/${room.id}/events`);
+        });
+
+      } else if (!next[index]) {
+        // Leave any other seat first
+        const cleanArr = next.map(val => val === currentUserName ? null : val);
+        cleanArr[index] = currentUserName;
+
+        // Log seat-join event persistently
+        addDoc(eventsRef, {
+          userId,
+          userName: currentUserName,
+          type: 'seat-join',
+          timestamp: serverTimestamp()
+        }).catch(err => {
+          handleFirestoreError(err, OperationType.CREATE, `rooms/${room.id}/events`);
+        });
+
+        return cleanArr;
+      }
+      return next;
+    });
+  };
 
   const [ping, setPing] = useState(48);
   const [connectionQuality, setConnectionQuality] = useState<'Good' | 'Fair' | 'Poor' | 'Critical'>('Good');
+
+  // Agora refs
+  const clientRef = useRef<IAgoraRTCClient | null>(null);
+  const localAudioTrackRef = useRef<ILocalAudioTrack | null>(null);
+  const [appId, setAppId] = useState<string | null>(null);
+  const [agoraState, setAgoraState] = useState<'connecting' | 'connected' | 'error'>('connecting');
+
+  useEffect(() => {
+    fetch('/api/agora-config')
+      .then(res => res.json())
+      .then(data => setAppId(data.appId))
+      .catch(() => setAgoraState('error'));
+  }, []);
+
+  useEffect(() => {
+    if (!appId) return;
+
+    setAgoraState('connecting');
+    
+    // Fetch token
+    fetch(`/api/agora-token?channelName=room_${room.id}`)
+      .then(res => res.json())
+      .then(async data => {
+        try {
+          clientRef.current = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+
+          clientRef.current.on("user-published", async (user, mediaType) => {
+            try {
+              await clientRef.current?.subscribe(user, mediaType);
+              if (mediaType === "audio") {
+                user.audioTrack?.play();
+              }
+            } catch (err) {
+              console.error("Subscription or play failure:", err);
+            }
+          });
+
+          clientRef.current.on("connection-state-change", (curState) => {
+            if (curState === "CONNECTED") {
+              setAgoraState('connected');
+            } else if (curState === "CONNECTING" || curState === "RECONNECTING") {
+              setAgoraState('connecting');
+            } else if (curState === "DISCONNECTED") {
+              setAgoraState('connecting');
+            }
+          });
+
+          await clientRef.current.join(appId, "room_" + room.id, data.token, null);
+          setAgoraState('connected');
+        } catch (err) {
+          console.error("Agora join error:", err);
+          setAgoraState('error');
+        }
+      })
+      .catch(err => {
+        console.error("Agora token fetch error:", err);
+        setAgoraState('error');
+      });
+
+    return () => {
+      clientRef.current?.leave().catch(err => console.error("Error leaving agora client:", err));
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.close();
+      }
+    };
+  }, [appId, room.id]);
+
+  const toggleMic = async () => {
+    if (!clientRef.current) return;
+    if (!micActive) {
+      try {
+        localAudioTrackRef.current = await AgoraRTC.createMicrophoneAudioTrack();
+        await clientRef.current.publish(localAudioTrackRef.current);
+        setMicActive(true);
+      } catch (err) { console.error("Error activating mic:", err); }
+    } else {
+      if (localAudioTrackRef.current) {
+        await clientRef.current.unpublish(localAudioTrackRef.current);
+        localAudioTrackRef.current.close();
+        localAudioTrackRef.current = null;
+      }
+      setMicActive(false);
+    }
+  };
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -54,320 +200,602 @@ export default function RoomView({ room, isHost, onLeave }: RoomViewProps) {
   const handleTriggerFloatingGift = (icon: string) => {
     const id = Math.random().toString();
     setFloatingGifts(prev => [...prev, { id, icon }]);
-    setTimeout(() => {
-      setFloatingGifts(prev => prev.filter(g => g.id !== id));
-    }, 2200);
+    setTimeout(() => setFloatingGifts(prev => prev.filter(g => g.id !== id)), 2200);
   };
-  
-  // Custom stage seat speakers
-  const [speakers, setSpeakers] = useState<string[]>([
-    room.host, 'Zekarias_Abebe', 'Bethel_S', 'Alem_Ethio'
-  ]);
 
   const msgScrollRef = useRef<HTMLDivElement>(null);
 
+  // Dynamic random speaker talking effect state simulation
+  const [talkingUserIndex, setTalkingUserIndex] = useState<number | null>(null);
   useEffect(() => {
-    // Generate some starter chat activity messages
-    setMessages([
-      { id: '1', sender: 'System_Bot_Live', text: 'Welcome to the Live Social Room! Ensure respectful interactions.' },
-      { id: '2', sender: 'Zekarias_Abebe', text: 'Stellar stream quality today! High-Fidelity Opus voice sounds great.' },
-      { id: '3', sender: 'Bethel_S', text: 'Sending roses to the host 🌹' }
+    const interval = setInterval(() => {
+      // randomly pick a speaker seat index to be "talking"
+      const occupiedIndices = speakers
+        .map((sp, idx) => (sp !== null ? idx : -1))
+        .filter(idx => idx !== -1);
+      if (occupiedIndices.length > 0) {
+        const randIndex = occupiedIndices[Math.floor(Math.random() * occupiedIndices.length)];
+        // Host (index 0) only has talking state if local mic is on
+        if (randIndex === 0) {
+          setTalkingUserIndex(micActive ? 0 : null);
+        } else {
+          setTalkingUserIndex(randIndex);
+        }
+      } else {
+        setTalkingUserIndex(null);
+      }
+    }, 3800);
+    return () => clearInterval(interval);
+  }, [speakers, micActive]);
+
+  useEffect(() => {
+    // Initial static chat messages
+    setChatMessages([
+      { id: '1', sender: 'System_Bot_Live', text: 'Welcome to the Live Social Room! Ensure respectful interactions.', timestamp: new Date(Date.now() - 30000) },
+      { id: '2', sender: 'Zekarias_Abebe', text: 'Stellar stream quality today! High-Fidelity Opus voice sounds great.', timestamp: new Date(Date.now() - 20000) },
+      { id: '3', sender: 'Bethel_S', text: 'Sending roses to the host 🌹', timestamp: new Date(Date.now() - 10000) }
     ]);
   }, [room.id]);
 
+  // Firestore path for error logging
+  const eventsSubcollectionPath = `rooms/${room.id}/events`;
+
+  // Write join/leave activity to subcollection
   useEffect(() => {
-    if (msgScrollRef.current) {
-      msgScrollRef.current.scrollTop = msgScrollRef.current.scrollHeight;
-    }
-  }, [messages]);
+    if (!room.id || !auth.currentUser) return;
+    
+    const userId = auth.currentUser.uid;
+    const userName = auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || 'Guest_User';
+    
+    // Add real event 'join'
+    const eventsRef = collection(db, 'rooms', room.id, 'events');
+    addDoc(eventsRef, {
+      userId,
+      userName,
+      type: 'join',
+      timestamp: serverTimestamp()
+    }).catch(err => {
+      handleFirestoreError(err, OperationType.CREATE, eventsSubcollectionPath);
+    });
+
+    return () => {
+      // Add real event 'leave'
+      addDoc(eventsRef, {
+        userId,
+        userName,
+        type: 'leave',
+        timestamp: serverTimestamp()
+      }).catch(err => {
+        handleFirestoreError(err, OperationType.CREATE, eventsSubcollectionPath);
+      });
+    };
+  }, [room.id]);
+
+  // Realtime subscription to events subcollection
+  useEffect(() => {
+    if (!room.id) return;
+
+    const eventsRef = collection(db, 'rooms', room.id, 'events');
+    const q = query(eventsRef, orderBy('timestamp', 'asc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const liveEvents = snapshot.docs.map(doc => {
+        const data = doc.data();
+        let text = '';
+        const userLabel = `@${data.userName}`;
+
+        switch (data.type) {
+          case 'join':
+            text = `📢 ${userLabel} joined the room`;
+            break;
+          case 'leave':
+            text = `👋 ${userLabel} left the room`;
+            break;
+          case 'seat-join':
+            text = `🎤 ${userLabel} sat on the mic stage`;
+            break;
+          case 'seat-leave':
+            text = `🛋 ${userLabel} stepped down from the mic stage`;
+            break;
+          default:
+            text = `⚡ ${userLabel} triggered action: ${data.type}`;
+        }
+
+        return {
+          id: doc.id,
+          sender: 'System_Bot_Live',
+          text,
+          timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : new Date()
+        };
+      });
+
+      setRemoteEvents(liveEvents);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, eventsSubcollectionPath);
+    });
+
+    return () => unsubscribe();
+  }, [room.id]);
+
+  // Computed combined visual list
+  const combinedMessages = [...chatMessages, ...remoteEvents].sort((a, b) => {
+    return a.timestamp.getTime() - b.timestamp.getTime();
+  });
+
+  useEffect(() => {
+    if (msgScrollRef.current) msgScrollRef.current.scrollTop = msgScrollRef.current.scrollHeight;
+  }, [combinedMessages, showChatPanel]);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMsg.trim()) return;
-    const currentUserName = auth.currentUser?.displayName || auth.currentUser?.email || 'Guest';
-    setMessages(prev => [...prev, {
-      id: Math.random().toString(),
-      sender: currentUserName,
-      text: newMsg.trim()
-    }]);
+    const currentUserName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Guest';
+    setChatMessages(prev => [
+      ...prev, 
+      { 
+        id: Math.random().toString(), 
+        sender: currentUserName, 
+        text: newMsg.trim(),
+        timestamp: new Date()
+      }
+    ]);
     setNewMsg('');
   };
 
-  const handleLike = () => {
-    setLikesCount(prev => prev + 1);
-  };
+  // Profile icon helper
+  const currentUserPhoto = auth.currentUser?.photoURL || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+  const currentUserName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'User';
+  const currentUserId = auth.currentUser?.uid?.substring(0, 7).toUpperCase() || '1068462';
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 50 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      exit={{ opacity: 0, y: 50 }}
-      className="fixed inset-0 z-[120] bg-zinc-950 flex flex-col justify-between overflow-hidden"
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      exit={{ opacity: 0 }}
+      id="roomContainer"
+      className="fixed inset-0 z-[120] bg-cover bg-center select-none overflow-hidden"
+      style={{ backgroundImage: `url('https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1200')` }}
     >
-      {/* Background Ambience Glows */}
-      <div className="absolute top-10 left-12 w-64 h-64 rounded-full bg-blue-600/15 blur-[100px] pointer-events-none" />
-      <div className="absolute bottom-10 right-12 w-64 h-64 rounded-full bg-amber-400/10 blur-[100px] pointer-events-none" />
+      {/* Wave animation styles */}
+      <style>{`
+        @keyframes wave {
+          from { transform: scale(1); opacity: 1; }
+          to { transform: scale(1.6); opacity: 0; }
+        }
+        .avatar-pulsing::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: 9999px;
+          border: 3px solid #00ffd5;
+          animation: wave 1.5s infinite;
+        }
+      `}</style>
 
-      {/* Share Toast */}
+      {/* Background Masking & Blur Overlay */}
+      <div className="absolute inset-0 bg-black/65 backdrop-blur-[5px] z-0 pointer-events-none" />
+
+      {/* Float notifications */}
       {showCopiedToast && (
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -20 }}
-          className="fixed top-20 z-[300] left-1/2 -translate-x-1/2 bg-emerald-500 text-white px-4 py-2 rounded-full text-xs font-black"
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+          className="fixed top-20 z-[300] left-1/2 -translate-x-1/2 bg-emerald-500 text-white px-5 py-2 rounded-full text-xs font-black tracking-wide shadow-lg shadow-emerald-500/20"
         >
           Link Copied!
         </motion.div>
       )}
 
-      {/* Header Panel */}
-      <div className="bg-black/40 backdrop-blur-md border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+      {/* Floating Gift Animations */}
+      <div className="absolute inset-x-0 bottom-32 top-32 pointer-events-none z-50 flex items-center justify-center overflow-hidden">
+        <AnimatePresence>
+          {floatingGifts.map(gift => (
+            <motion.div
+              key={gift.id}
+              initial={{ opacity: 0, scale: 0.3, y: 150 }}
+              animate={{ opacity: 1, scale: 1.5, y: -200, rotate: 12 }}
+              exit={{ opacity: 0, scale: 2 }}
+              transition={{ duration: 1.8, ease: "easeOut" }}
+              className="absolute text-5xl font-extrabold filter drop-shadow-[0_0_15px_rgba(251,191,36,0.8)]"
+            >
+              {gift.icon}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* TOP BAR */}
+      <div id="roomTopBar" className="relative z-10 px-6 py-4 flex items-center justify-between bg-black/30 backdrop-blur-md border-b border-white/5">
+        
+        {/* User Profile Info */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-amber-400/10 rounded-2xl border border-amber-400/20 flex items-center justify-center font-black text-amber-500 font-mono text-xl">
-            {room.title ? room.title.substring(0, 1).toUpperCase() : 'B'}
-          </div>
+          <img 
+            src={currentUserPhoto} 
+            alt="profile" 
+            className="w-12 h-12 rounded-full object-cover border-2 border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.3)] cursor-pointer hover:scale-105 transition-all"
+          />
           <div>
-            <h3 className="text-white font-black text-sm uppercase tracking-tight truncate max-w-[180px]">{room.title}</h3>
-            <p className="text-zinc-550 text-[9px] font-black uppercase tracking-widest">Host: @{room.host} • Live</p>
+            <h3 className="text-white font-bold text-sm tracking-tight">{currentUserName}</h3>
+            <p className="text-[10px] text-amber-450 font-mono tracking-widest uppercase">ID: {currentUserId}</p>
           </div>
         </div>
 
+        {/* Room Title / Status */}
+        <div className="hidden md:flex flex-col items-center">
+          <span className="text-xs font-extrabold text-amber-500 font-mono tracking-widest bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20 shadow-sm animate-pulse">
+            ★ {room.title || "LIVE VOICE ROOM"} ★
+          </span>
+        </div>
+
+        {/* Agora Connection & Stats */}
         <div className="flex items-center gap-3">
-          {/* Connection quality warning & ping reading badge */}
+          
           <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[9px] font-mono font-black tracking-tight ${
-            connectionQuality === 'Good'
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-              : connectionQuality === 'Fair'
-                ? 'bg-yellow-500/12 border-yellow-550/20 text-yellow-500'
-                : connectionQuality === 'Poor'
-                  ? 'bg-orange-500/12 border-orange-550/20 text-orange-400'
-                  : 'bg-red-500/15 border-red-500/35 text-red-400 animate-pulse'
+            agoraState === 'connected' ? 'bg-emerald-500/15 border-emerald-500/25 text-emerald-400' :
+            agoraState === 'connecting' ? 'bg-amber-500/15 border-amber-500/25 text-amber-400 animate-pulse' :
+            'bg-red-500/15 border-red-500/35 text-red-400'
           }`}>
-            <span className="text-[11px] leading-none">
-              {connectionQuality === 'Good' || connectionQuality === 'Fair' ? '📶' : '⚠️'}
-            </span>
-            <span>{ping} MS</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              agoraState === 'connected' ? 'bg-emerald-400' :
+              agoraState === 'connecting' ? 'bg-amber-400 animate-pulse' :
+              'bg-red-500 animate-ping'
+            }`} />
+            <span className="uppercase">STREAM: {agoraState}</span>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-black/50 border border-white/5 px-3 py-1.5 rounded-full font-mono text-zinc-400 text-[10px] font-bold">
-            <Users className="w-3.5 h-3.5 text-amber-400 cursor-pointer hover:text-amber-300" onClick={() => setShowListeners(true)} />
-            <span className="cursor-pointer" onClick={() => setShowListeners(true)}>{room.viewers || '420'}</span>
+          <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full border text-[9px] font-mono font-black ${
+            connectionQuality === 'Good' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/15 border-red-500/35 text-red-400 animate-pulse'
+          }`}>
+            <span>📶 {ping} MS</span>
           </div>
 
-          <button 
-            onClick={handleShare}
-            className="text-zinc-400 hover:text-white p-2 border-0 bg-transparent cursor-pointer"
-          >
+          <button onClick={handleShare} className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-zinc-300 hover:text-white flex items-center justify-center border-0 transition-colors cursor-pointer">
             <Share2 className="w-4 h-4" />
           </button>
 
-          <button 
-            onClick={onLeave}
-            className="bg-red-650 hover:bg-red-700 text-white rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border-0"
-          >
-            Leave
+          <button onClick={onLeave} className="bg-red-650 hover:bg-red-700 text-white rounded-xl px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest transition-all cursor-pointer border-0 shadow-[0_4px_12px_rgba(239,68,68,0.2)]">
+            ✖
           </button>
         </div>
       </div>
 
-
-      {/* Main Grid View */}
-      <div className="flex-1 overflow-y-auto no-scrollbar p-6 grid lg:grid-cols-12 gap-6 z-10">
-        {/* Stage seats section */}
-        <div className="lg:col-span-7 flex flex-col justify-between space-y-6">
-          <div className="bg-black/30 border border-white/5 rounded-[2.5rem] p-6 space-y-6 flex-1 flex flex-col justify-center">
-            <h4 className="text-center text-[10px] font-black text-zinc-650 uppercase tracking-[0.2em] mb-4">Mic Stage Seats</h4>
-            
-            <div className="grid grid-cols-4 gap-4 justify-items-center">
-              {Array.from({ length: 8 }).map((_, i) => {
-                const speakerName = speakers[i];
-                const activeSpeaking = micActive && i === 0; // Simulate host talking
-                return (
-                  <div key={i} className="flex flex-col items-center space-y-2 select-none">
-                    <div className={`w-14 h-14 rounded-full border flex items-center justify-center font-black relative transition-all ${
-                      speakerName 
-                        ? 'bg-zinc-900 text-zinc-300' 
-                        : 'bg-black/40 border-dashed border-white/10 text-zinc-650 hover:border-white/20'
-                    } ${activeSpeaking ? 'ring-4 ring-amber-400 ring-offset-4 ring-offset-zinc-950 scale-[1.05]' : 'border-white/5'}`}>
-                      {speakerName ? speakerName.substring(0, 2).toUpperCase() : '+'}
-                      
-                      {speakerName && (
-                        <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-1 border border-white/5">
-                          {activeSpeaking ? (
-                            <Mic className="w-3 h-3 text-amber-400" />
-                          ) : (
-                            <MicOff className="w-3 h-3 text-zinc-650" />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-[8px] font-black text-zinc-400 max-w-[60px] truncate uppercase font-sans">
-                      {speakerName ? speakerName : 'Empty Seat'}
-                    </span>
-                  </div>
-                );
-              })}
+      {/* SEATS STAGE CONTAINER */}
+      <div id="roomSeatsStage" className="relative z-10 w-full max-w-4xl mx-auto px-6 pt-16 pb-2">
+        
+        {/* ROW 1: Seat 1 (Key Host Seat) */}
+        <div className="flex justify-center mb-10">
+          <div className="text-center group" onClick={() => handleSeatClick(0)}>
+            <div className={`w-20 h-20 rounded-full bg-zinc-850/80 backdrop-blur-md flex items-center justify-center text-4xl position-relative cursor-pointer transition-all hover:scale-105 border-2 ${
+              speakers[0] ? 'border-amber-400 ring-4 ring-amber-400/20 text-zinc-200' : 'border-dashed border-white/20 text-zinc-500 hover:border-white/40'
+            } ${talkingUserIndex === 0 || (micActive && speakers[0] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.4)] avatar-pulsing' : ''}`}>
+              {speakers[0] ? (
+                speakers[0].substring(0, 2).toUpperCase()
+              ) : '🎤'}
+              {speakers[0] && (
+                <div className="absolute -bottom-1 -right-1 bg-black text-[10px] rounded-full p-1 border border-white/10">
+                  {micActive ? '🔊' : '🔇'}
+                </div>
+              )}
             </div>
-          </div>
-
-          {/* Quick controls bar */}
-          <div className="bg-black/35 border border-white/5 rounded-2xl p-4 flex gap-4 justify-center items-center">
-            <button 
-              onClick={() => setMicActive(!micActive)}
-              className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors cursor-pointer border-0 ${
-                micActive ? 'bg-amber-400 text-black' : 'bg-zinc-805 text-zinc-400'
-              }`}
-            >
-              {micActive ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-            </button>
-
-            <button 
-              onClick={() => setVideoActive(!videoActive)}
-              className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors cursor-pointer border-0 ${
-                videoActive ? 'bg-amber-400 text-black' : 'bg-zinc-850 text-zinc-400'
-              }`}
-            >
-              {videoActive ? <Camera className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
-            </button>
-
-            <button 
-              onClick={handleLike}
-              className="w-12 h-12 rounded-xl bg-zinc-850 text-zinc-300 hover:text-red-500 flex items-center justify-center transition-colors cursor-pointer border-0"
-            >
-              <Heart className={`w-5 h-5 ${likesCount > 0 ? 'fill-red-500 text-red-500 animate-pulse' : ''}`} />
-            </button>
-
-            <button 
-              onClick={() => setShowGifting(true)}
-              className="w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 text-black flex items-center justify-center pointer cursor-pointer border-0 font-bold hover:scale-105 transition-transform"
-            >
-              <Gift className="w-5 h-5" />
-            </button>
+            <p className="text-xs font-black tracking-wide mt-2 text-amber-400 uppercase drop-shadow">
+              {speakers[0] ? `@${speakers[0]}` : 'Seat 1 (Host)'}
+            </p>
           </div>
         </div>
 
-        {/* Messaging Chat Column */}
-        <div className="lg:col-span-5 flex flex-col justify-between bg-black/40 border border-white/5 rounded-[2.5rem] overflow-hidden min-h-[350px]">
-          {/* Messages scrollarea */}
-          <div ref={msgScrollRef} className="flex-1 p-5 overflow-y-auto space-y-3 max-h-[300px] no-scrollbar">
-            {messages.map(msg => (
-              <div key={msg.id} className="text-xs space-y-0.5">
-                <span className="text-amber-450 font-black uppercase text-[9px] tracking-wide block hover:underline cursor-pointer">
-                  @{msg.sender}
-                </span>
-                <p className="text-zinc-300 font-sans leading-relaxed text-left bg-zinc-900/30 p-2.5 rounded-2xl border border-white/5 inline-block max-w-full">
-                  {msg.text}
-                </p>
-              </div>
-            ))}
+        {/* ROW 2: Seats 2, 3, 4 (👑 VIP Seats), Seat 5 */}
+        <div className="flex justify-center gap-6 md:gap-10 mb-10 overflow-x-auto no-scrollbar py-2">
+          
+          {/* Seat 2 (VIP) */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(1)}>
+            <div className={`w-[74px] h-[74px] rounded-full flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 bg-gradient-to-tr from-amber-400 to-orange-500 shadow-[0_0_15px_rgba(245,158,11,0.4)] ${
+              speakers[1] ? 'border-amber-300 text-zinc-100' : 'border-amber-500/40 text-amber-200'
+            } ${talkingUserIndex === 1 || (micActive && speakers[1] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[1] ? speakers[1].substring(0, 2).toUpperCase() : '👑'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-amber-100 drop-shadow">
+              {speakers[1] ? `@${speakers[1]}` : '2 👑'}
+            </p>
           </div>
 
-          {/* Form write comments */}
-          <form onSubmit={handleSendMessage} className="p-4 bg-black/40 border-t border-white/5 flex gap-2">
-            <input 
-              type="text"
-              value={newMsg}
-              onChange={(e) => setNewMsg(e.target.value)}
-              placeholder="Send message inside room..."
-              className="bg-black/60 border border-white/5 rounded-xl px-4 py-3 text-xs font-bold text-white outline-none flex-1 focus:border-amber-400 transition-colors"
-            />
-            <button 
-              type="submit"
-              className="bg-zinc-805 hover:bg-zinc-750 text-white p-3.5 rounded-xl transition-all cursor-pointer border-0 active:scale-95"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+          {/* Seat 3 (VIP) */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(2)}>
+            <div className={`w-[74px] h-[74px] rounded-full flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 bg-gradient-to-tr from-amber-400 to-orange-500 shadow-[0_0_15px_rgba(245,158,11,0.4)] ${
+              speakers[2] ? 'border-amber-300 text-zinc-100' : 'border-amber-500/40 text-amber-200'
+            } ${talkingUserIndex === 2 || (micActive && speakers[2] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[2] ? speakers[2].substring(0, 2).toUpperCase() : '👑'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-amber-100 drop-shadow">
+              {speakers[2] ? `@${speakers[2]}` : '3 👑'}
+            </p>
+          </div>
+
+          {/* Seat 4 (VIP) */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(3)}>
+            <div className={`w-[74px] h-[74px] rounded-full flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 bg-gradient-to-tr from-amber-400 to-orange-500 shadow-[0_0_15px_rgba(245,158,11,0.4)] ${
+              speakers[3] ? 'border-amber-300 text-zinc-100' : 'border-amber-500/40 text-amber-200'
+            } ${talkingUserIndex === 3 || (micActive && speakers[3] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[3] ? speakers[3].substring(0, 2).toUpperCase() : '👑'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-amber-100 drop-shadow">
+              {speakers[3] ? `@${speakers[3]}` : '4 👑'}
+            </p>
+          </div>
+
+          {/* Seat 5 (Normal Sofa seat) */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(4)}>
+            <div className={`w-[74px] h-[74px] rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 ${
+              speakers[4] ? 'border-white/30 text-zinc-200' : 'border-white/10 text-zinc-400 hover:border-white/20'
+            } ${talkingUserIndex === 4 || (micActive && speakers[4] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[4] ? speakers[4].substring(0, 2).toUpperCase() : '🛋'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-zinc-400 drop-shadow">
+              {speakers[4] ? `@${speakers[4]}` : '5 🛋'}
+            </p>
+          </div>
+
+        </div>
+
+        {/* ROW 3: Seats 6, 7, 8, 9 (All Normal Sofa seats) */}
+        <div className="flex justify-center gap-6 md:gap-10 mb-4 overflow-x-auto no-scrollbar py-2">
+          
+          {/* Seat 6 */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(5)}>
+            <div className={`w-[74px] h-[74px] rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 ${
+              speakers[5] ? 'border-white/30 text-zinc-200' : 'border-white/10 text-zinc-400 hover:border-white/20'
+            } ${talkingUserIndex === 5 || (micActive && speakers[5] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[5] ? speakers[5].substring(0, 2).toUpperCase() : '🛋'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-zinc-400 drop-shadow">
+              {speakers[5] ? `@${speakers[5]}` : '6 🛋'}
+            </p>
+          </div>
+
+          {/* Seat 7 */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(6)}>
+            <div className={`w-[74px] h-[74px] rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 ${
+              speakers[6] ? 'border-white/30 text-zinc-200' : 'border-white/10 text-zinc-400 hover:border-white/20'
+            } ${talkingUserIndex === 6 || (micActive && speakers[6] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[6] ? speakers[6].substring(0, 2).toUpperCase() : '🛋'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-zinc-400 drop-shadow">
+              {speakers[6] ? `@${speakers[6]}` : '7 🛋'}
+            </p>
+          </div>
+
+          {/* Seat 8 */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(7)}>
+            <div className={`w-[74px] h-[74px] rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 ${
+              speakers[7] ? 'border-white/30 text-zinc-200' : 'border-white/10 text-zinc-400 hover:border-white/20'
+            } ${talkingUserIndex === 7 || (micActive && speakers[7] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[7] ? speakers[7].substring(0, 2).toUpperCase() : '🛋'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-zinc-400 drop-shadow">
+              {speakers[7] ? `@${speakers[7]}` : '8 🛋'}
+            </p>
+          </div>
+
+          {/* Seat 9 */}
+          <div className="text-center group shrink-0" onClick={() => handleSeatClick(8)}>
+            <div className={`w-[74px] h-[74px] rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-3xl position-relative cursor-pointer transition-all hover:scale-105 border-2 ${
+              speakers[8] ? 'border-white/30 text-zinc-200' : 'border-white/10 text-zinc-400 hover:border-white/20'
+            } ${talkingUserIndex === 8 || (micActive && speakers[8] === currentUserName) ? 'scale-108 ring-4 ring-cyan-400 shadow-[0_0_20px_#00ffd5] avatar-pulsing' : ''}`}>
+              {speakers[8] ? speakers[8].substring(0, 2).toUpperCase() : '🛋'}
+            </div>
+            <p className="text-[10px] font-black mt-2 text-zinc-400 drop-shadow">
+              {speakers[8] ? `@${speakers[8]}` : '9 🛋'}
+            </p>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* LEFT MENU (RAIL RAIL) */}
+      <div id="roomLeftMenu" className="absolute left-4 top-1/2 -translate-y-1/2 z-25 flex flex-col gap-3">
+        <button 
+          onClick={() => { setActiveTab('All'); setShowChatPanel(true); }}
+          className={`w-14 h-20 rounded-3xl border-0 font-extrabold uppercase transition-all tracking-wider text-xs cursor-pointer shadow-lg active:scale-95 ${
+            activeTab === 'All' ? 'bg-[#11d9d2] text-white shadow-[#11d9d2]/30' : 'bg-black/60 text-zinc-400 hover:text-white'
+          }`}
+        >
+          All
+        </button>
+        <button 
+          onClick={() => { setActiveTab('Room'); setShowChatPanel(false); }}
+          className={`w-14 h-20 rounded-3xl border-0 font-extrabold uppercase transition-all tracking-wider text-xs cursor-pointer shadow-lg active:scale-95 ${
+            activeTab === 'Room' ? 'bg-[#11d9d2] text-white shadow-[#11d9d2]/30' : 'bg-black/60 text-zinc-400 hover:text-white'
+          }`}
+        >
+          Room
+        </button>
+        <button 
+          onClick={() => { setActiveTab('Chat'); setShowChatPanel(true); }}
+          className={`w-14 h-20 rounded-3xl border-0 font-extrabold uppercase transition-all tracking-wider text-xs cursor-pointer shadow-lg active:scale-95 ${
+            activeTab === 'Chat' ? 'bg-[#11d9d2] text-white shadow-[#11d9d2]/30' : 'bg-black/60 text-zinc-400 hover:text-white'
+          }`}
+        >
+          Chat
+        </button>
+      </div>
+
+      {/* RIGHT ACTION ICONS */}
+      <div id="roomRightMenu" className="absolute right-4 top-1/2 -translate-y-1/2 z-25 flex flex-col gap-3">
+        <button 
+          title="Battle"
+          className="w-14 h-14 rounded-2xl bg-white/10 hover:bg-white/15 text-white flex items-center justify-center font-extrabold text-2xl cursor-pointer border-0 transition-transform active:scale-90"
+        >
+          ⚔
+        </button>
+        <button 
+          title="Gifts"
+          onClick={() => setShowGifting(true)}
+          className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 shadow-md text-slate-900 flex items-center justify-center font-extrabold text-2xl cursor-pointer border-0 transition-transform active:scale-90"
+        >
+          🎁
+        </button>
+        <button 
+          title="Wallet"
+          className="w-14 h-14 rounded-2xl bg-white/10 hover:bg-white/15 text-yellow-400 flex items-center justify-center font-extrabold text-2xl cursor-pointer border-0 transition-transform active:scale-90"
+        >
+          💰
+        </button>
+      </div>
+
+      {/* SYSTEM NOTICE BANNER */}
+      <div id="roomWelcomeNotice" className="absolute left-6 right-6 md:left-24 md:right-24 bottom-32 z-10 bg-black/55 backdrop-blur-md border border-white/5 rounded-2xl p-4">
+        <h3 className="text-red-500 font-extrabold text-xs uppercase tracking-widest mb-1.5 flex items-center gap-1">
+          📢 Welcome to Barca-Live
+        </h3>
+        <p className="text-zinc-300 text-[10.5px] font-medium leading-relaxed">
+          Welcome to Barca-live voice room. Open your microphone and start talking with your friends live. Keep conversations respectful and follow community rules.
+        </p>
+      </div>
+
+      {/* CHAT CHANT PANEL OVERLAY (If chat is visible via bottom bar toggle or buttons) */}
+      <AnimatePresence>
+        {showChatPanel && (
+          <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 30 }}
+            className="absolute left-6 md:left-24 bottom-52 z-30 max-w-sm w-full bg-black/60 border border-white/10 rounded-[2rem] overflow-hidden flex flex-col justify-between max-h-[180px] shadow-2xl backdrop-blur-xl"
+          >
+            <div ref={msgScrollRef} className="flex-1 p-4 overflow-y-auto space-y-2 no-scrollbar max-h-[120px]">
+              {combinedMessages.map(msg => (
+                <div key={msg.id} className="text-left text-[11px] leading-snug">
+                  <span className={`${msg.sender === 'System_Bot_Live' ? 'text-cyan-400' : 'text-amber-400'} font-bold block`}>@{msg.sender}</span>
+                  <span className="text-zinc-200">{msg.text}</span>
+                </div>
+              ))}
+            </div>
+
+            <form onSubmit={handleSendMessage} className="p-2 border-t border-white/5 bg-black/40 flex items-center gap-2">
+              <input 
+                type="text" 
+                value={newMsg} 
+                onChange={(e) => setNewMsg(e.target.value)} 
+                placeholder="Type inside room chat..."
+                className="bg-black/40 border border-white/10 rounded-full px-3 py-1.5 text-[10px] text-white outline-none flex-1 focus:border-cyan-400 transition-colors"
+              />
+              <button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white rounded-full p-2 border-0 cursor-pointer active:scale-90">
+                <Send className="w-3 h-3" />
+              </button>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* BOTTOM CONTROL NAVIGATION BAR */}
+      <div id="roomBottomControls" className="relative z-10 px-6 py-4 flex items-center justify-between bg-black/45 backdrop-blur-lg border-t border-white/5">
+        
+        {/* Large Premium Main Mic Toggle Button */}
+        <button 
+          onClick={toggleMic} 
+          className={`mic-btn w-16 h-16 rounded-full flex items-center justify-center border-0 text-3xl font-extrabold cursor-pointer transition-all shadow-xl shadow-red-500/20 active:scale-95 ${
+            micActive ? 'active bg-[#00c853] text-white shadow-emerald-500/30 font-bold micStatePulse' : 'bg-[#ff004c] text-white'
+          }`}
+          style={{
+            animation: micActive ? 'micPulse 1.2s infinite' : 'none'
+          }}
+        >
+          {micActive ? '🔊' : '🎤'}
+        </button>
+
+        {/* Pulse Animations script helper styling inside button */}
+        <style>{`
+          @keyframes micPulse {
+            0% { transform: scale(1); box-shadow: 0 0 10px rgba(0, 200, 83, 0.4); }
+            50% { transform: scale(1.08); box-shadow: 0 0 25px rgba(0, 200, 83, 0.7); }
+            100% { transform: scale(1); box-shadow: 0 0 10px rgba(0, 200, 83, 0.4); }
+          }
+        `}</style>
+
+        {/* Right side extra shortcuts */}
+        <div className="flex gap-2.5">
+          <div 
+            title="Play Game" 
+            className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/15 text-white flex items-center justify-center text-xl cursor-pointer backdrop-blur-md border border-white/5 active:scale-90 transition-transform"
+          >
+            🎮
+          </div>
+          <div 
+            title="Toggle Chat"
+            onClick={() => setShowChatPanel(!showChatPanel)}
+            className={`w-12 h-12 rounded-full text-white flex items-center justify-center text-xl cursor-pointer backdrop-blur-md border active:scale-90 transition-transform ${
+              showChatPanel ? 'bg-cyan-500/20 border-cyan-400' : 'bg-white/10 border-white/5 hover:bg-white/15'
+            }`}
+          >
+            💬
+          </div>
+          <div 
+            title="Send Gift"
+            onClick={() => setShowGifting(true)}
+            className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/15 text-white flex items-center justify-center text-xl cursor-pointer backdrop-blur-md border border-white/5 active:scale-90 transition-transform"
+          >
+            🎁
+          </div>
+          <div 
+            title="Rules"
+            onClick={() => setShowRules(true)}
+            className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/15 text-white flex items-center justify-center text-xl cursor-pointer backdrop-blur-md border border-white/5 active:scale-90 transition-transform"
+          >
+            ☰
+          </div>
         </div>
       </div>
 
-      {/* Active Listeners Modal */}
+      {/* Rules Modal (If expanded rules/status requested) */}
       <AnimatePresence>
-        {showListeners && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-            <div onClick={() => setShowListeners(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+        {showRules && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-zinc-900 border border-white/10 p-6 rounded-[2rem] w-full max-w-sm relative z-10"
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-900 border border-white/15 p-6 rounded-3xl max-w-sm w-full shadow-2xl"
             >
-              <h3 className="text-white font-black uppercase text-sm mb-4">Active Listeners</h3>
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                {[...speakers, 'Guest_1', 'Guest_2', 'Ethio_Fan'].map((user, i) => (
-                  <div key={i} className="flex items-center justify-between bg-black/40 p-3 rounded-xl border border-white/5">
-                    <span className="text-zinc-300 font-bold text-xs">@{user}</span>
-                    <button className="text-[9px] bg-red-950/50 text-red-400 px-2 py-1 rounded border border-red-900/50">Mute</button>
-                  </div>
-                ))}
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-amber-400 font-extrabold text-sm uppercase tracking-wide">Community Guidelines</h3>
+                <button onClick={() => setShowRules(false)} className="text-zinc-400 hover:text-white bg-transparent border-0 cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
+              <ul className="space-y-3 text-zinc-300 text-xs list-disc list-inside">
+                <li>Respect all room participants and the active host.</li>
+                <li>Hate speech, discrimination, and bullying are strictly banned.</li>
+                <li>No spamming or disruptive audio broadcasting.</li>
+                <li>Follow the safety instructions of the live moderators.</li>
+              </ul>
               <button 
-                onClick={() => setShowListeners(false)}
-                className="w-full mt-4 bg-zinc-800 text-white py-2 rounded-xl text-xs font-bold"
+                onClick={() => setShowRules(false)}
+                className="w-full mt-6 bg-gradient-to-tr from-amber-400 to-orange-500 text-slate-900 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider border-0 cursor-pointer"
               >
-                Close
+                Understood & Agree
               </button>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Gift presentation drawer overlay */}
+      {/* Gifting panel Component overlay */}
       <AnimatePresence>
         {showGifting && (
-          <div className="fixed inset-0 z-[200]">
-            <div onClick={() => setShowGifting(false)} className="absolute inset-0 bg-black/70 backdrop-blur-xs" />
-            <div className="absolute bottom-0 left-0 right-0 max-w-md mx-auto z-10">
-              <div className="bg-zinc-950 border-t border-white/10 rounded-t-[3.5rem] p-2 relative overflow-hidden">
-                <Gifts onGiftSent={handleTriggerFloatingGift} />
-                <button 
-                  onClick={() => setShowGifting(false)}
-                  className="absolute top-6 right-6 p-2 bg-zinc-900 border border-white/5 rounded-full text-zinc-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
+          <Gifts 
+            onClose={() => setShowGifting(false)} 
+            onGiftSent={(giftIcon) => {
+              handleTriggerFloatingGift(giftIcon);
+              // append custom system notification
+              const sender = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'User';
+              setChatMessages(prev => [...prev, {
+                id: Math.random().toString(),
+                sender: 'System_Bot_Live',
+                text: `🎉 @${sender} gifted ${giftIcon} to the Voice Stage!`,
+                timestamp: new Date()
+              }]);
+            }} 
+          />
         )}
       </AnimatePresence>
-
-      {/* Floating Gifts Overlay - moves chosen icons from simulated avatar/controls point to viewport center */}
-      <div className="absolute inset-0 pointer-events-none z-[250] overflow-hidden">
-        <AnimatePresence>
-          {floatingGifts.map((gift) => (
-            <motion.div
-              key={gift.id}
-              initial={{ 
-                x: window.innerWidth > 768 ? '35%' : '15%', 
-                y: '40%', 
-                scale: 0.1, 
-                opacity: 0,
-                rotate: 0 
-              }}
-              animate={{ 
-                x: '0%', 
-                y: '0%', 
-                scale: [0.1, 2.5, 4.2, 3.2], 
-                opacity: [0, 1, 1, 0],
-                rotate: [0, 15, -15, 360],
-              }}
-              exit={{ opacity: 0 }}
-              transition={{ 
-                duration: 2.3, 
-                ease: "easeOut"
-              }}
-              className="absolute left-[54%] top-[50%] -translate-x-1/2 -translate-y-1/2 text-7xl filter drop-shadow-[0_12px_30px_rgba(245,158,11,0.65)] flex items-center justify-center pointer-events-none"
-            >
-              <div className="relative pointer-events-none flex items-center justify-center">
-                <span className="text-8xl">{gift.icon}</span>
-                {/* Glow ring backing */}
-                <span className="absolute w-24 h-24 bg-amber-400/20 rounded-full blur-xl -z-10 animate-ping" />
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-      </motion.div>
+    </motion.div>
   );
 }
+

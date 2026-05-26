@@ -131,6 +131,63 @@ class BarcaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun registerUserWithReferral(username: String, pword: String, referralCode: String?, onFinished: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            _loginError.value = null
+            val matchedUser = repository.getUserByUsername(username)
+            if (matchedUser != null) {
+                onFinished(false, "Username/Email is already registered")
+                return@launch
+            }
+
+            var referrerId: Int? = null
+            if (!referralCode.isNullOrEmpty()) {
+                val referrer = repository.getUserByCode(referralCode)
+                if (referrer != null) {
+                    referrerId = referrer.id
+                }
+            }
+
+            val randomCode = generateUserCode()
+            val newUser = User(
+                userCode = randomCode,
+                username = username,
+                password = pword,
+                coins = 20000
+            )
+            val idLong = repository.insertUser(newUser)
+
+            // Add commission to referrer
+            if (referrerId != null) {
+                val referrer = repository.getUserByIdSuspended(referrerId)
+                if (referrer != null) {
+                    val updatedReferrer = referrer.copy(coins = referrer.coins + 5000)
+                    repository.updateUser(updatedReferrer)
+                    repository.insertTransaction(CoinTransaction(
+                        userId = referrer.id,
+                        amount = 5000,
+                        type = "REFERRAL_REWARD",
+                        paymentMethod = "Referral: New user $username",
+                        timestamp = System.currentTimeMillis()
+                    ))
+                }
+            }
+
+            val createdUser = newUser.copy(id = idLong.toInt())
+            _currentUser.value = createdUser
+            
+            // Add a welcome transaction to the new user
+            repository.insertTransaction(CoinTransaction(
+                userId = createdUser.id,
+                amount = 20000,
+                type = "GENERATED",
+                paymentMethod = "Welcome Bonus",
+                timestamp = System.currentTimeMillis()
+            ))
+            onFinished(true, null)
+        }
+    }
+
     fun logout() {
         _currentUser.value = null
     }

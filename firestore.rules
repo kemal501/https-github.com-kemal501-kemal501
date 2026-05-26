@@ -81,6 +81,16 @@ service cloud.firestore {
           request.auth.uid == get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId
         );
       }
+
+      match /events/{eventId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && 
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.keys().hasAll(['userId', 'userName', 'type', 'timestamp']) &&
+          request.resource.data.keys().size() == 4 &&
+          request.resource.data.type in ['join', 'leave', 'seat-join', 'seat-leave'] &&
+          request.resource.data.timestamp == request.time;
+      }
     }
 
     // Withdrawals

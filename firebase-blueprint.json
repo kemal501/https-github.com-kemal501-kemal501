@@ -185,6 +185,18 @@
         "timestamp": { "type": "number" }
       },
       "required": ["reporterId", "targetId", "reason", "timestamp"]
+    },
+    "RoomEvent": {
+      "title": "Room Event",
+      "description": "User join/leave activity log for a live room.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "type": { "type": "string", "enum": ["join", "leave", "seat-join", "seat-leave"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "type", "timestamp"]
     }
   },
   "firestore": {
@@ -231,6 +243,10 @@
     "rooms/{roomId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Room chat messages."
+    },
+    "rooms/{roomId}/events/{eventId}": {
+      "schema": "RoomEvent",
+      "description": "User join/leave activity logs in the room."
     },
     "tasks/{taskId}": {
       "schema": "Task",

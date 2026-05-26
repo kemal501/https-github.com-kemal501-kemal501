@@ -19,7 +19,9 @@ class BarcaRepository(
 
     suspend fun insertUser(user: User): Long = userDao.insertUser(user)
     suspend fun getUserByUsername(username: String): User? = userDao.getUserByUsername(username)
+    suspend fun getUserByCode(userCode: String): User? = userDao.getUserByCode(userCode)
     fun getUserById(userId: Int): Flow<User?> = userDao.getUserById(userId)
+    suspend fun getUserByIdSuspended(userId: Int): User? = userDao.getUserByIdSuspended(userId)
     suspend fun updateUser(user: User) = userDao.updateUser(user)
     suspend fun addCoinsToUser(userId: Int, amount: Int) = userDao.addCoins(userId, amount)
 
